@@ -1,0 +1,28 @@
+{
+  "name": "@aa/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "api": "npx nodemon apps/api/src/index.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.9",
+    "axios": "^1.13.5",
+    "cors": "^2.8.6",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "ioredis": "^5.9.3",
+    "mongoose": "^9.2.1",
+    "node-cron": "^4.2.1",
+    "socket.io": "^4.8.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}

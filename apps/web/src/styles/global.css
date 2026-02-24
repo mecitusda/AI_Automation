@@ -1,0 +1,127 @@
+/* ========== BASE ========== */
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  background: #0f1115;
+  color: #e5e7eb;
+}
+
+.container {
+  padding: 40px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ========== HEADERS ========== */
+
+.page-title {
+  font-size: 26px;
+  font-weight: 700;
+  margin-bottom: 20px;
+}
+
+.subtle {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+/* ========== CARD ========== */
+
+.card {
+  background: #1a1d24;
+  border: 1px solid #2a2f3a;
+  border-radius: 14px;
+  padding: 20px;
+  transition: 0.2s ease;
+}
+
+.card:hover {
+  border-color: #3b82f6;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.2);
+}
+
+/* ========== STATUS BADGE ========== */
+
+.badge {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge.completed { background: #16a34a; }
+.badge.failed { background: #dc2626; }
+.badge.running { background: #2563eb; }
+.badge.cancelled { background: #6b7280; }
+.badge.retrying { background: #ca8a04; }
+.badge.pending { background: #374151; }
+
+/* ========== PROGRESS BAR ========== */
+
+.progress {
+  height: 6px;
+  background: #2a2f3a;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #3b82f6;
+  transition: width 0.4s ease;
+}
+
+/* ========== STEP LIST ========== */
+
+.step-row {
+  background: #1f232d;
+  border: 1px solid #2a2f3a;
+  padding: 14px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.step-meta {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* ========== LOG PANEL ========== */
+
+.log-panel {
+  background: #0c0f14;
+  border: 1px solid #2a2f3a;
+  border-radius: 12px;
+  padding: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.log-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.log-time {
+  width: 70px;
+  color: #6b7280;
+}
+
+.log-step {
+  color: #3b82f6;
+}
+
+.log-msg.info { color: #60a5fa; }
+.log-msg.success { color: #22c55e; }
+.log-msg.error { color: #ef4444; }
+.log-msg.retry { color: #facc15; }
+.log-msg.skipped { color: #9ca3af; }

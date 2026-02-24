@@ -1,0 +1,298 @@
+/* src/styles/runs.css */
+
+:root{
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel2: #1f2430;
+  --border: #2a3140;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --muted2:#6b7280;
+
+  --blue:#3b82f6;
+  --green:#16a34a;
+  --red:#dc2626;
+  --yellow:#ca8a04;
+  --gray:#6b7280;
+}
+
+body{
+  margin:0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.page{
+  min-height: 100vh;
+  padding: 32px;
+  box-sizing: border-box;
+}
+
+.header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom: 18px;
+  gap: 16px;
+}
+
+.title{
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: .2px;
+}
+
+.meta{
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.grid{
+  display:grid;
+  gap: 16px;
+}
+
+.cardLink{
+  text-decoration:none;
+  color: inherit;
+}
+
+.card{
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  transition: border-color .2s ease, box-shadow .2s ease, transform .15s ease;
+}
+
+.card:hover{
+  border-color: rgba(59,130,246,.65);
+  box-shadow: 0 10px 30px rgba(0,0,0,.35), 0 0 0 1px rgba(59,130,246,.15);
+  transform: translateY(-1px);
+}
+
+.row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap: 14px;
+}
+
+.id{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.created{
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted2);
+}
+
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  border: 1px solid rgba(255,255,255,.06);
+}
+
+.badge.queued{ background: rgba(202,138,4,.2); color: #fde68a; }
+.badge.running{ background: rgba(59,130,246,.2); color: #bfdbfe; }
+.badge.completed{ background: rgba(22,163,74,.2); color: #bbf7d0; }
+.badge.failed{ background: rgba(220,38,38,.2); color: #fecaca; }
+.badge.cancelled{ background: rgba(107,114,128,.2); color: #e5e7eb; }
+
+.duration{
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align:right;
+}
+
+.progressWrap{
+  margin-top: 14px;
+}
+
+.progressBar{
+  height: 8px;
+  background: rgba(255,255,255,.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progressFill{
+  height: 100%;
+  background: var(--blue);
+  width: 0%;
+  transition: width .35s ease;
+}
+
+.progressText{
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.badgesRow{
+  margin-top: 14px;
+  display:flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stepBadge{
+  display:inline-flex;
+  align-items:center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid rgba(255,255,255,.06);
+}
+
+.stepBadge.pending{ background: rgba(107,114,128,.18); color:#e5e7eb; }
+.stepBadge.running{ background: rgba(59,130,246,.18); color:#bfdbfe; }
+.stepBadge.retrying{ background: rgba(202,138,4,.18); color:#fde68a; }
+.stepBadge.completed{ background: rgba(22,163,74,.18); color:#bbf7d0; }
+.stepBadge.failed{ background: rgba(220,38,38,.18); color:#fecaca; }
+
+.retryChip{
+  font-size: 10px;
+  font-weight: 800;
+  color: #fde68a;
+  opacity: .95;
+}
+
+/* Detail page */
+
+.section{
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.sectionTitle{
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.stepRow{
+  background: var(--panel2);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  padding: 14px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom: 10px;
+}
+
+.stepName{
+  font-weight: 650;
+}
+
+.stepMeta{
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  display:flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stepStatus {
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  border: 1px solid rgba(255,255,255,0.06);
+  letter-spacing: 0.5px;
+}
+
+/* Status variations */
+.stepStatus.pending {
+  background: rgba(107,114,128,0.18);
+  color: #d1d5db;
+}
+
+.stepStatus.running {
+  background: rgba(59,130,246,0.18);
+  color: #93c5fd;
+  box-shadow: 0 0 8px rgba(59,130,246,0.3);
+}
+
+.stepStatus.retrying {
+  background: rgba(202,138,4,0.18);
+  color: #fde68a;
+  box-shadow: 0 0 8px rgba(202,138,4,0.3);
+}
+
+.stepStatus.completed {
+  background: rgba(22,163,74,0.18);
+  color: #86efac;
+}
+
+.stepStatus.failed {
+  background: rgba(220,38,38,0.18);
+  color: #fca5a5;
+}
+
+.stepStatus.skipped {
+  background: rgba(148,163,184,0.15);
+  color: #94a3b8;
+}
+
+/* Logs */
+.logPanel{
+  background: #0c0f14;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  max-height: 420px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.logRow{
+  display:flex;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+
+.logRow:last-child{
+  border-bottom:none;
+}
+
+.logTime{
+  width: 78px;
+  color: var(--muted2);
+  flex-shrink: 0;
+}
+
+.logStep{
+  color: #93c5fd;
+  flex-shrink: 0;
+}
+
+.logMsg{
+  flex: 1;
+  color: #cbd5e1;
+}
+
+.logMsg.info{ color: #93c5fd; }
+.logMsg.success{ color: #86efac; }
+.logMsg.error{ color: #fca5a5; }
+.logMsg.retry{ color: #fde68a; }
+.logMsg.skipped{ color: #9ca3af; }
