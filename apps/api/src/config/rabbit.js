@@ -5,7 +5,7 @@ export let channel;
 export async function connectRabbit() {
   const connection = await amqp.connect(process.env.RABBIT_URL);
   channel = await connection.createChannel();
-
+  await channel.prefetch(5)
   await channel.assertExchange("automation.direct", "direct", { durable: true });
 
 
@@ -31,5 +31,34 @@ export async function connectRabbit() {
   });
   await channel.assertQueue("step.retry.fire.q", { durable: true });
   await channel.bindQueue("step.retry.fire.q", "automation.direct", "step.retry.fire");
+
+  await channel.assertQueue("step.timeout.q", {
+    durable: true,
+    arguments: {
+      "x-dead-letter-exchange": "automation.direct",
+      "x-dead-letter-routing-key": "step.timeout.fire"
+    }
+  });
+
+  await channel.assertQueue("step.timeout.fire.q", { durable: true });
+
+  await channel.bindQueue(
+    "step.timeout.fire.q",
+    "automation.direct",
+    "step.timeout.fire"
+  );
+
+  await channel.assertQueue("step.cancel.q", { durable: true });
+  await channel.bindQueue("step.cancel.q", "automation.direct", "step.cancel");
+
+  await channel.assertQueue("dispatch.kick.q", { durable: true });
+  await channel.bindQueue("dispatch.kick.q", "automation.direct", "dispatch.kick");
+
+  await channel.assertQueue("workflow.created.q", { durable: true });
+  await channel.bindQueue(
+    "workflow.created.q",
+    "automation.direct",
+    "workflow.created"
+  );
   console.log("RabbitMQ connected");
 }

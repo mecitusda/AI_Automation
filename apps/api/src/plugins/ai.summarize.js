@@ -1,5 +1,9 @@
 export default {
-  async execute({ previousOutput }) {
+  async execute({ previousOutput, signal }) {
+
+    if (signal?.aborted) {
+      throw new Error("Cancelled");
+    }
 
     if (!previousOutput) {
       return "Nothing to summarize";

@@ -6,6 +6,126 @@ import { registerCronWorkflow, stopCronWorkflow  } from "../config/scheduler.js"
 
 const router = express.Router();
 
+
+// GET
+
+router.get("/:id/versions", async (req, res) => {
+  try {
+    const wf = await Workflow.findById(req.params.id);
+    if (!wf) return res.status(404).json({ error: "Workflow not found" });
+
+    const versions = (wf.versions || [])
+      .slice()
+      .sort((a, b) => a.version - b.version)
+      .map(v => ({
+        version: v.version,
+        stepCount: v.steps?.length ?? 0,
+        maxParallel: v.maxParallel ?? 5,
+        createdAt: v.createdAt
+      }));
+
+    res.json({ workflowId: wf._id.toString(), currentVersion: wf.currentVersion, versions });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  try {
+    const wf = await Workflow.findById(req.params.id);
+    if (!wf) return res.status(404).json({ error: "Not found" });
+
+    res.json({
+      id: wf._id.toString(),
+      name: wf.name,
+      enabled: wf.enabled,
+      currentVersion: wf.currentVersion,
+      maxParallel: wf.maxParallel,
+      trigger: wf.trigger?.type ?? "manual",
+      steps: wf.steps
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get("/", async (_req, res) => {
+  const workflows = await Workflow.find().sort({ createdAt: -1 });
+
+  res.json(
+    workflows.map(w => ({
+      id: w._id.toString(),
+      name: w.name,
+      enabled: w.enabled,
+      currentVersion: w.currentVersion,
+      stepCount: w.steps?.length ?? 0,
+      trigger: w.trigger?.type
+    }))
+  );
+});
+
+// POsT
+
+router.post("/:id/rollback/:version", async (req, res) => {
+  try {
+    const { id, version } = req.params;
+    const targetVersion = Number(version);
+    const wf = await Workflow.findById(id);
+    if (!wf) return res.status(404).json({ error: "Workflow not found" });
+
+    // versions init (legacy safety)
+    if (!wf.versions || wf.versions.length === 0) {
+      wf.versions = [{
+        version: wf.currentVersion || 1,
+        steps: wf.steps ?? [],
+        maxParallel: wf.maxParallel ?? 5,
+        createdAt: new Date()
+      }];
+      wf.currentVersion = wf.currentVersion || 1;
+    }
+
+    const snap = wf.versions.find(v => v.version === targetVersion);
+    if (!snap) {
+      return res.status(404).json({ error: `Version ${targetVersion} not found` });
+    }
+
+    const oldTriggerType = wf.trigger?.type;
+    const oldEnabled = wf.enabled;
+
+    // ✅ rollback
+    wf.currentVersion = targetVersion;
+    console.log(wf.currentVersion)
+    // UI + legacy convenience: active snapshot sync
+    wf.steps = snap.steps;
+    wf.maxParallel = snap.maxParallel ?? wf.maxParallel ?? 5;
+
+    const updated = await wf.save();
+
+    // ✅ cron reconcile (aynı mantığı rollback sonrası da uygula)
+    const nowTriggerType = updated.trigger?.type;
+    const nowEnabled = updated.enabled;
+
+    // cron'dan çıktıysa veya disabled olduysa durdur
+    if (oldTriggerType === "cron" && (!nowEnabled || nowTriggerType !== "cron")) {
+      stopCronWorkflow(updated._id.toString());
+    }
+
+    // cron + enabled ise yeniden register
+    if (nowEnabled && nowTriggerType === "cron") {
+      stopCronWorkflow(updated._id.toString());
+      registerCronWorkflow(updated);
+    }
+
+    res.json({
+      ok: true,
+      workflowId: updated._id.toString(),
+      currentVersion: updated.currentVersion
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 /**
  * @swagger
  * /workflows/{id}/run:
@@ -35,6 +155,7 @@ router.post("/:id/run", async (req, res) => {
 
     const run = await Run.create({
       workflowId: workflow._id,
+      workflowVersion: workflow.currentVersion,
       status: "queued"
     });
 
@@ -123,60 +244,188 @@ router.post("/:id/run", async (req, res) => {
  */
 router.post("/", async (req, res) => {
   try {
-    console.log("Creating workflow:", req.body);
-    const workflow = await Workflow.create(req.body);
+    const {
+      name,
+      steps = [],
+      maxParallel = 5,
+      trigger = { type: "manual" },
+      enabled = true
+    } = req.body;
+
+    // 🔒 Client’tan versions gelirse ignore
+    const workflow = await Workflow.create({
+      name,
+      steps,
+      maxParallel,
+      trigger,
+      enabled,
+
+      currentVersion: 1,
+      versions: [
+        {
+          version: 1,
+          steps,
+          maxParallel,
+          createdAt: new Date()
+        }
+      ]
+    });
+
     if (workflow.enabled && workflow.trigger?.type === "cron") {
       registerCronWorkflow(workflow);
     }
+    await channel.publish(
+      "automation.direct",
+      "workflow.created",
+      Buffer.from(JSON.stringify({
+        workflowId: workflow._id.toString()
+      }))
+    );
     res.json(workflow);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
+// PUT 
 
-
-
-router.get("/", async (req, res) => {
-  const workflows = await Workflow.find();
-  res.json(workflows);
-});
-
-
+/**
+ * @swagger
+ * /workflows/{id}:
+ *   put:
+ *     summary: Update workflow
+ *     tags: [Workflows]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Workflow ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               steps:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *               maxParallel:
+ *                 type: number
+ *               trigger:
+ *                 type: object
+ *                 properties:
+ *                   type:
+ *                     type: string
+ *                     enum: [manual, cron]
+ *                   cron:
+ *                     type: string
+ *               enabled:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Workflow updated
+ *       404:
+ *         description: Workflow not found
+ */
 router.put("/:id", async (req, res) => {
   try {
-    const existing = await Workflow.findById(req.params.id);
-    if (!existing) {
+    const workflow = await Workflow.findById(req.params.id);
+    if (!workflow) {
       return res.status(404).json({ error: "Workflow not found" });
     }
 
-    const updated = await Workflow.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true }
-    );
+    const oldTriggerType = workflow.trigger?.type;
+    const oldEnabled = workflow.enabled;
 
-    const id = updated._id.toString();
+    const {
+      steps,
+      maxParallel,
+      name,
+      enabled,
+      trigger,
+      ...rest
+    } = req.body || {};
 
-    // Eğer eskisi cron idiyse ama artık değilse → durdur
-    if (
-      existing.trigger?.type === "cron" &&
-      (!updated.enabled || updated.trigger?.type !== "cron")
-    ) {
-      stopCronWorkflow(id);
+    // ---- META UPDATE ----
+    if (name !== undefined) workflow.name = name;
+    if (enabled !== undefined) workflow.enabled = enabled;
+    if (trigger !== undefined) workflow.trigger = trigger;
+
+    Object.assign(workflow, rest);
+
+    // ---- VERSION INIT (LEGACY SUPPORT) ----
+    if (!workflow.versions || workflow.versions.length === 0) {
+      workflow.versions = [{
+        version: 1,
+        steps: workflow.steps ?? [],
+        maxParallel: workflow.maxParallel ?? 5,
+        createdAt: new Date()
+      }];
+      workflow.currentVersion = 1;
     }
 
-    // Eğer cron ve enabled ise → yeniden register
+    const currentDef = workflow.versions.find(
+      v => v.version === workflow.currentVersion
+    );
+
+    const stepsChanged =
+      steps !== undefined &&
+      JSON.stringify(steps) !== JSON.stringify(currentDef.steps);
+
+    const parallelChanged =
+      maxParallel !== undefined &&
+      maxParallel !== currentDef.maxParallel;
+
+    if (stepsChanged || parallelChanged) {
+      const nextVersion = workflow.currentVersion + 1;
+
+      const nextSteps = stepsChanged ? steps : currentDef.steps;
+      const nextParallel = parallelChanged ? maxParallel : currentDef.maxParallel;
+
+      workflow.versions.push({
+        version: nextVersion,
+        steps: nextSteps,
+        maxParallel: nextParallel,
+        createdAt: new Date()
+      });
+
+      workflow.currentVersion = nextVersion;
+
+      // active snapshot sync
+      workflow.steps = nextSteps;
+      workflow.maxParallel = nextParallel;
+    }
+
+    const updated = await workflow.save();
+
+    // ---- CRON LOGIC ----
+    if (
+      oldTriggerType === "cron" &&
+      (!updated.enabled || updated.trigger?.type !== "cron")
+    ) {
+      stopCronWorkflow(updated._id.toString());
+    }
+
     if (updated.enabled && updated.trigger?.type === "cron") {
-      stopCronWorkflow(id); // varsa önce temizle
+      stopCronWorkflow(updated._id.toString());
       registerCronWorkflow(updated);
     }
 
     res.json(updated);
+
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
+
+
+// DELETE 
 
 router.delete("/:id", async (req, res) => {
   try {

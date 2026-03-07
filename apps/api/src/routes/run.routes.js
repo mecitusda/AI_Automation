@@ -26,13 +26,21 @@ router.get("/:id/summary", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const run = await Run.findById(req.params.id);
+    const run = await Run.findById(req.params.id)
+      .populate("workflowId", "name")
+      .lean();
 
     if (!run) {
       return res.status(404).json({ error: "Run not found" });
     }
 
-    res.json(run);
+    const { workflowId, ...rest } = run;
+    const result = {
+      ...rest,
+      workflow: workflowId // { _id: "...", name: "..." } olarak gelir
+    };
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -56,16 +64,19 @@ router.post("/:id/cancel", async (req, res) => {
   try {
     const runId = req.params.id;
 
-    await channel.publish(
-      "automation.direct",
-      "run.cancel",
-      Buffer.from(JSON.stringify({
-        runId,
-        reason: req.body?.reason || ""
-      }))
+    await channel.sendToQueue(
+      "run.cancel.q",
+      Buffer.from(
+        JSON.stringify({
+          runId,
+          reason: req.body?.reason || "User cancelled"
+        })
+      ),
+      { persistent: true }
     );
 
     res.json({ message: "Cancel requested", runId });
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,13 +1,23 @@
 import mongoose from "mongoose";
 
+
+const stepSchema = new mongoose.Schema({
+  id: { type: String, required: true },
+  type: { type: String, required: true },
+  params: { type: Object, default: {} },
+  retry: { type: Number, default: 0 },
+  dependsOn: { type: [String], default: [] },
+  timeout: { type: Number, default: 0 }
+}, { _id: false });
+
 const stepStateSchema = new mongoose.Schema({
   stepId: { type: String, required: true },
-
+  executionId: { type: String },
   retryCount: { type: Number, default: 0 },
 
   status: {
     type: String,
-    enum: ["pending", "running", "retrying", "completed", "failed", "skipped"],
+    enum: ["pending", "running", "retrying", "completed", "failed", "skipped", "cancelled"],
     default: "pending"
   },
 
@@ -59,8 +69,19 @@ const runSchema = new mongoose.Schema({
     default: {}
   },
   durationMs: Number,
+  workflowVersion: { type: Number, required: true },
+  workflowSnapshot: {
+    steps: { type: [stepSchema], required: true },
+    maxParallel: { type: Number, default: 5 },
+    version: { type: Number }
+  },
   createdAt: { type: Date, default: Date.now },
   finishedAt: Date
 });
 
+
+runSchema.index({ workflowId: 1 });
+runSchema.index({ status: 1 });
+runSchema.index({ createdAt: -1 });
+runSchema.index({ "stepStates.stepId": 1 });
 export const Run = mongoose.model("Run", runSchema);

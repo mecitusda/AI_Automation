@@ -49,6 +49,7 @@ export function registerCronWorkflow(workflow) {
       stepStates: [],
       logs: [],
       processedMessages: [],
+      workflowVersion: workflow.currentVersion,
       outputs: new Map(),
       createdAt: new Date()
     });

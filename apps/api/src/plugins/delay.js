@@ -1,10 +1,24 @@
 export default {
-  async execute({ params }) {
+  async execute({ params, signal }) {
     const ms = params?.ms ?? 10000;
 
-    console.log(`Delaying for ${ms} ms`);
+    console.log(`[DELAY] Started for ${ms} ms`);
+    const start = Date.now();
+    await new Promise((resolve, reject) => {
+      
+      const timeout = setTimeout(() => {
+        console.log("[DELAY] Finished normally");
+        resolve();
+      }, ms);
 
-    await new Promise((resolve) => setTimeout(resolve, ms));
+      if (signal) {
+        signal.addEventListener("abort", () => {
+          console.log("[DELAY] ABORTED and timeout for aborted: ",Date.now() - start);
+          clearTimeout(timeout);
+          reject(new Error("Timeout exceeded"));
+        });
+      }
+    });
 
     return { delayed: ms };
   }

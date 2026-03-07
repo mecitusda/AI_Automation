@@ -1,127 +1,219 @@
 /* ========== BASE ========== */
-
-body {
-  margin: 0;
-  font-family: Inter, system-ui, -apple-system, sans-serif;
-  background: #0f1115;
-  color: #e5e7eb;
+*{
+  box-sizing: border-box;
 }
 
-.container {
+html{
+  font-size: 62.5%;
+}
+
+body{
+  margin:0;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  background:#0b0f17;
+  color:#e6edf3;
+  -webkit-font-smoothing: antialiased;
+  font-size: 1rem;
+}
+
+.main{
+  min-height: 100vh;
+  position: relative;
+}
+
+.container{
   padding: 40px;
-  max-width: 1200px;
+  max-width: 1300px;
   margin: 0 auto;
 }
 
-/* ========== HEADERS ========== */
-
-.page-title {
-  font-size: 26px;
-  font-weight: 700;
-  margin-bottom: 20px;
+.w-50{
+  width: 50%;
 }
 
-.subtle {
+.w-60{
+  width: 60%;
+}
+
+.w-70{
+  width: 70%;
+}
+
+.w-80{
+  width: 80%;
+}
+
+.w-90{
+  width: 90%;
+}
+/* ========== TYPOGRAPHY ========== */
+
+.page-title{
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 24px;
+}
+
+.subtle{
   font-size: 13px;
-  color: #9ca3af;
+  color:#8b949e;
 }
 
 /* ========== CARD ========== */
 
-.card {
-  background: #1a1d24;
-  border: 1px solid #2a2f3a;
-  border-radius: 14px;
-  padding: 20px;
-  transition: 0.2s ease;
-}
-
-.card:hover {
-  border-color: #3b82f6;
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.2);
-}
-
-/* ========== STATUS BADGE ========== */
-
-.badge {
-  padding: 4px 10px;
-  font-size: 11px;
-  border-radius: 999px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.badge.completed { background: #16a34a; }
-.badge.failed { background: #dc2626; }
-.badge.running { background: #2563eb; }
-.badge.cancelled { background: #6b7280; }
-.badge.retrying { background: #ca8a04; }
-.badge.pending { background: #374151; }
-
-/* ========== PROGRESS BAR ========== */
-
-.progress {
-  height: 6px;
-  background: #2a2f3a;
-  border-radius: 999px;
-  overflow: hidden;
-  margin-top: 12px;
-}
-
-.progress-fill {
-  height: 100%;
-  background: #3b82f6;
-  transition: width 0.4s ease;
-}
-
-/* ========== STEP LIST ========== */
-
-.step-row {
-  background: #1f232d;
-  border: 1px solid #2a2f3a;
-  padding: 14px;
-  border-radius: 10px;
-  margin-bottom: 10px;
+.cards{
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 2rem;
 }
 
-.step-meta {
-  font-size: 12px;
-  color: #9ca3af;
+.card{
+  background:#121826;
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:16px;
+  padding:22px;
+  transition: all .25s ease;
+
+}
+
+.card:hover{
+  border-color:rgba(59,130,246,.4);
+  box-shadow: 0 0 25px rgba(59,130,246,.2);
+}
+
+/* ========== PROGRESS ========== */
+
+.progress{
+  height:8px;
+  background:rgba(255,255,255,.05);
+  border-radius:999px;
+  overflow:hidden;
+}
+
+.progress-fill{
+  height:100%;
+  background:linear-gradient(90deg,#3b82f6,#60a5fa);
+  transition: width .4s ease;
+}
+
+/* ========== STEP ROW ========== */
+
+.step-row{
+  background:#161e2e;
+  border:1px solid rgba(255,255,255,.05);
+  border-radius:14px;
+  padding:16px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.step-meta{
+  font-size:12px;
+  color:#8b949e;
 }
 
 /* ========== LOG PANEL ========== */
 
-.log-panel {
-  background: #0c0f14;
-  border: 1px solid #2a2f3a;
-  border-radius: 12px;
-  padding: 16px;
-  max-height: 400px;
-  overflow-y: auto;
-  font-family: monospace;
-  font-size: 13px;
+.log-panel{
+  background:#0c111b;
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:16px;
+  padding:18px;
+  max-height:400px;
+  overflow:auto;
+  font-family: ui-monospace, monospace;
 }
 
-.log-row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 6px;
+.log-row{
+  display:flex;
+  gap:12px;
+  margin-bottom:6px;
 }
 
-.log-time {
-  width: 70px;
-  color: #6b7280;
+.log-time{
+  width:75px;
+  color:#6e7681;
 }
 
-.log-step {
-  color: #3b82f6;
+.log-step{
+  font-weight:600;
 }
 
-.log-msg.info { color: #60a5fa; }
-.log-msg.success { color: #22c55e; }
-.log-msg.error { color: #ef4444; }
-.log-msg.retry { color: #facc15; }
-.log-msg.skipped { color: #9ca3af; }
+.log-msg.info{ color:#93c5fd; }
+.log-msg.success{ color:#86efac; }
+.log-msg.error{ color:#fca5a5; }
+.log-msg.retry{ color:#fde68a; }
+.log-msg.skipped{ color:#94a3b8; }
+
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    position: absolute;
+    top:50%;
+    left:50%;
+    transform: translate(-50%,-50%);
+  }
+  .spinner::before,
+  .spinner::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+  }
+  .spinner::before {
+    inset: 0;
+    border: 2px solid var(--blue-dim);
+  }
+  .spinner::after {
+    inset: 0;
+    border: 2px solid transparent;
+    border-top-color: var(--blue);
+    border-right-color: var(--blue);
+    animation: orbit 0.9s cubic-bezier(0.4,0,0.2,1) infinite;
+    filter: drop-shadow(0 0 6px var(--blue));
+  }
+  @keyframes orbit {
+    to { transform: rotate(360deg); }
+  }
+
+  button {
+    background-color: #1e2130;
+    color: #ffffff;
+    border: 1px solid #6b7280;
+    padding: 5px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 4px;
+ 
+  }
+
+  button:hover {
+    background-color: #2d3348;
+    border-color: #9ca3af;
+    color: #ffffff;
+  }
+
+  button:active {
+    background-color: #3b4261;
+  }
+
+  .cancelBtn {
+  background: #ef4444;
+  border: none;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.15s ease;
+}
+
+.cancelBtn:hover {
+  background: #dc2626;
+}
+
+.cancelBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

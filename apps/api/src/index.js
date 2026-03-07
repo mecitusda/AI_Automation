@@ -12,6 +12,8 @@ import { connectRabbit } from "./config/rabbit.js";
 import workflowRoutes from "./routes/workflow.routes.js";
 import runRoutes from "./routes/run.routes.js";
 import { startScheduler } from "./config/scheduler.js";
+import metricRoutes from "./routes/metrics.routes.js"
+import monitoringRoutes from "./routes/monitoring.routes.js";
 
 const app = express();
 
@@ -34,6 +36,8 @@ app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use("/runs", runRoutes);
 app.use("/workflows", workflowRoutes);
+app.use("/metrics", metricRoutes);
+app.use("/monitoring", monitoringRoutes);
 
 app.get("/health", (req, res) => {
   res.json({ ok: true, service: "api", ts: Date.now() });

@@ -4,21 +4,22 @@ const stepSchema = new mongoose.Schema({
   id: { type: String, required: true },
   type: { type: String, required: true },
   params: { type: Object, default: {} },
-
-  retry: {
-    type: Number,
-    default: 0
-  },
+  retry: { type: Number, default: 0 },
   dependsOn: { type: [String], default: [] },
-  timeout: {
-    type: Number, // ms cinsinden
-    default: 0
-  },
+  timeout: { type: Number, default: 0 }
+}, { _id: false });
+
+const versionSchema = new mongoose.Schema({
+  version: { type: Number, required: true },
+  steps: { type: [stepSchema], required: true },
+  maxParallel: { type: Number, default: 5 },
+  createdAt: { type: Date, default: Date.now }
 }, { _id: false });
 
 const workflowSchema = new mongoose.Schema({
   name: { type: String, required: true },
   enabled: { type: Boolean, default: true },
+
   trigger: {
     type: {
       type: String,
@@ -27,11 +28,15 @@ const workflowSchema = new mongoose.Schema({
     },
     cron: { type: String }
   },
-  steps: [stepSchema],
-   maxParallel: {
-    type: Number,
-    default: 5
-  },
+
+  // 🔹 ACTIVE SNAPSHOT (legacy + convenience)
+  steps: { type: [stepSchema], default: [] },
+  maxParallel: { type: Number, default: 5 },
+
+  // 🔹 VERSIONING CORE
+  currentVersion: { type: Number, default: 1 },
+  versions: { type: [versionSchema], default: [] },
+
   createdAt: { type: Date, default: Date.now }
 });
 

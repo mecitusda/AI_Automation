@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "api": "npx nodemon apps/api/src/index.js"
+    "api": "npx nodemon apps/api/src/index.js",
+    "web": "cd apps/web && npm run dev"
   },
   "dependencies": {
     "amqplib": "^0.10.9",

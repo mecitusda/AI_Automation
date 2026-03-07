@@ -1,81 +1,90 @@
 import { channel } from "./config/rabbit.js";
 import { plugins } from "./plugins/index.js";
 
+const controllers = new Map(); // executionId -> AbortController
+
 export async function startWorker() {
 
-  await channel.consume("step.execute.q", async (msg) => {
+  // ✅ Cancel consumer
+  await channel.consume("step.cancel.q", async (msg) => {
     if (!msg) return;
 
-    const {
-      executionId,
-      runId,
-      stepIndex,
-      step,
-      previousOutput
-    } = JSON.parse(msg.content.toString());
-
     try {
-      console.log("Executing:", step.type, executionId);
+      const { executionId, reason } = JSON.parse(msg.content.toString());
+      const ctrl = controllers.get(executionId);
 
-      const plugin = plugins[step.type];
-      if (!plugin) {
-        throw new Error(`Plugin not found: ${step.type}`);
+      if (ctrl) {
+        ctrl.abort(new Error(reason || "Cancelled"));
+        controllers.delete(executionId);
       }
+    } finally {
+      channel.ack(msg);
+    }
+  });
 
-      const timeoutMs = step.timeout ?? 0;
+  // ✅ Execute consumer
+    await channel.consume("step.execute.q", async (msg) => {
+    if (!msg) return;
 
-      let output;
+    const { executionId, runId, stepIndex, step, previousOutput, globalToken  } =
+      JSON.parse(msg.content.toString());
 
-      if (timeoutMs > 0) {
-        output = await Promise.race([
-          plugin.execute({
-            params: step.params,
-            previousOutput
-          }),
-          new Promise((_, reject) =>
-            setTimeout(
-              () => reject(new Error("Step timeout")),
-              timeoutMs
-            )
-          )
-        ]);
-      } else {
-        output = await plugin.execute({
-          params: step.params,
-          previousOutput
-        });
-      }
-
+    const plugin = plugins[step.type];
+    if (!plugin) {
       await channel.publish(
         "automation.direct",
         "step.result",
         Buffer.from(JSON.stringify({
-          executionId,
-          runId,
-          stepIndex,
-          success: true,
-          output,
-          previousOutput
-        }))
-      );
-
-    } catch (err) {
-
-      await channel.publish(
-        "automation.direct",
-        "step.result",
-        Buffer.from(JSON.stringify({
-          executionId,
-          runId,
-          stepIndex,
+          executionId, runId, stepIndex,
           success: false,
-          error: err.message,
-          previousOutput
+          error: `Plugin not found: ${step.type}`,
+          previousOutput,
         }))
       );
+      return channel.ack(msg);
     }
 
-    channel.ack(msg);
+    const ctrl = new AbortController();
+    controllers.set(executionId, ctrl);
+
+    let timeoutHandle = null;
+
+
+    try {
+      const output = await plugin.execute({
+        params: step.params,
+        previousOutput,
+        signal: ctrl.signal   // ✅ plugin bunu kullanacak
+      });
+
+      await channel.publish(
+        "automation.direct",
+        "step.result",
+        Buffer.from(JSON.stringify({
+          executionId, runId, stepIndex,
+          success: true,
+          output,
+          previousOutput,
+          globalToken 
+        }))
+      );
+    } catch (err) {
+      await channel.publish(
+        "automation.direct",
+        "step.result",
+        Buffer.from(JSON.stringify({
+          executionId, runId, stepIndex,
+          success: false,
+          error: err?.message || String(err),
+          previousOutput,
+          globalToken 
+        }))
+      );
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      controllers.delete(executionId);
+      channel.ack(msg);
+    }
   });
 
   console.log("Worker running...");
