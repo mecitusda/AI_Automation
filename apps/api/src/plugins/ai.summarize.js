@@ -1,4 +1,5 @@
 export default {
+  name: "ai.summarize",
   async execute({ previousOutput, signal }) {
 
     if (signal?.aborted) {

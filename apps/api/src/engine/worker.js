@@ -1,5 +1,5 @@
-import { channel } from "./config/rabbit.js";
-import { plugins } from "./plugins/index.js";
+import { channel } from "../config/rabbit.js";
+import { plugins } from "../plugins/index.js";
 
 const controllers = new Map(); // executionId -> AbortController
 
@@ -23,10 +23,10 @@ export async function startWorker() {
   });
 
   // ✅ Execute consumer
-    await channel.consume("step.execute.q", async (msg) => {
+  await channel.consume("step.execute.q", async (msg) => {
     if (!msg) return;
 
-    const { executionId, runId, stepIndex, step, previousOutput, globalToken  } =
+    const { executionId, runId, stepIndex, iteration, step, previousOutput, globalToken, loopStepId } =
       JSON.parse(msg.content.toString());
 
     const plugin = plugins[step.type];
@@ -35,10 +35,14 @@ export async function startWorker() {
         "automation.direct",
         "step.result",
         Buffer.from(JSON.stringify({
-          executionId, runId, stepIndex,
+          executionId, 
+          runId, 
+          stepIndex, 
+          iteration,
           success: false,
           error: `Plugin not found: ${step.type}`,
           previousOutput,
+          globalToken
         }))
       );
       return channel.ack(msg);
@@ -46,8 +50,6 @@ export async function startWorker() {
 
     const ctrl = new AbortController();
     controllers.set(executionId, ctrl);
-
-    let timeoutHandle = null;
 
 
     try {
@@ -61,11 +63,15 @@ export async function startWorker() {
         "automation.direct",
         "step.result",
         Buffer.from(JSON.stringify({
-          executionId, runId, stepIndex,
+          executionId, 
+          runId, 
+          stepIndex,
           success: true,
           output,
           previousOutput,
-          globalToken 
+          globalToken ,
+          iteration,
+          loopStepId
         }))
       );
     } catch (err) {
@@ -77,11 +83,12 @@ export async function startWorker() {
           success: false,
           error: err?.message || String(err),
           previousOutput,
-          globalToken 
+          globalToken ,
+          iteration,
+          loopStepId
         }))
       );
     } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
       controllers.delete(executionId);
       channel.ack(msg);
     }

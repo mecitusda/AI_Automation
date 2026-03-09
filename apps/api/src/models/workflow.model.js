@@ -3,7 +3,10 @@ import mongoose from "mongoose";
 const stepSchema = new mongoose.Schema({
   id: { type: String, required: true },
   type: { type: String, required: true },
-  params: { type: Object, default: {} },
+  params: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
   retry: { type: Number, default: 0 },
   dependsOn: { type: [String], default: [] },
   timeout: { type: Number, default: 0 }
@@ -36,7 +39,10 @@ const workflowSchema = new mongoose.Schema({
   // 🔹 VERSIONING CORE
   currentVersion: { type: Number, default: 1 },
   versions: { type: [versionSchema], default: [] },
-
+  tags: {
+    type: [String],
+    default: []
+  },
   createdAt: { type: Date, default: Date.now }
 });
 

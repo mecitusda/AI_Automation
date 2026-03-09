@@ -1,26 +1,103 @@
-export function resolveVariables(obj, outputs) {
+export function resolveVariables(obj, context) {
+
+  const { steps, run, trigger, env, loop } = context;
+  
+  function resolvePath(path) {
+
+    const parts = path.trim().split(".");
+    const root = parts.shift();
+
+    let source;
+    
+
+    if (root === "steps") {
+
+      const stepId = parts.shift();
+
+      let stepOutput;
+
+      if (steps instanceof Map) {
+        stepOutput = steps.get(stepId);
+      } else {
+        stepOutput = steps?.[stepId];
+      }
+    
+      source = stepOutput;
+    
+    } else if (root === "run") {
+      source = run;
+
+    } else if (root === "trigger") {
+      source = trigger;
+
+    } 
+    else if (root === "env") {
+      source = env;
+
+    } else if (root === "loop") {
+      source = loop;
+
+    } else {
+      console.log("unknown")
+      return "";
+    }
+    console.log("Source after root resolution:", source);
+    return parts.reduce((acc, key) => {
+
+  
+
+  if (acc instanceof Map) {
+    return acc.get(key);
+  }
+
+  return acc?.[key];
+
+}, source);
+  }
+
+  /* ---------------- STRING ---------------- */
+
   if (typeof obj === "string") {
+
+    const trimmed = obj.trim();
+
+    const pureMatch = trimmed.match(/^\{\{(.*?)\}\}$/);
+
+    if (pureMatch) {
+
+      const result = resolvePath(pureMatch[1]);
+
+      return result; // ARRAY / OBJECT olduğu gibi döner
+    }
+
     return obj.replace(/\{\{(.*?)\}\}/g, (_, path) => {
-      const parts = path.trim().split(".");
-      const [stepId, , ...rest] = parts;
 
-      const stepOutput = outputs.get(stepId);
-      if (!stepOutput) return "";
+      const val = resolvePath(path.trim());
 
-      return rest.reduce((acc, key) => acc?.[key], stepOutput) ?? "";
+      if (val === undefined || val === null) return "";
+
+      return String(val);
+
     });
   }
 
+  /* ---------------- ARRAY ---------------- */
+
   if (Array.isArray(obj)) {
-    return obj.map(item => resolveVariables(item, outputs));
+    return obj.map(v => resolveVariables(v, context));
   }
 
+  /* ---------------- OBJECT ---------------- */
+
   if (typeof obj === "object" && obj !== null) {
-    const newObj = {};
+
+    const out = {};
+
     for (const key in obj) {
-      newObj[key] = resolveVariables(obj[key], outputs);
+      out[key] = resolveVariables(obj[key], context);
     }
-    return newObj;
+
+    return out;
   }
 
   return obj;

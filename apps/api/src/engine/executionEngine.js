@@ -3,10 +3,12 @@ export async function publishStepExecution({
   stepPlain,
   runId,
   stepIndex,
+  iteration = 0,
   executionId,
   resolvedParams,
   previousOutput,
-  globalToken
+  globalToken,
+  loopStepId
 }) {
   await channel.publish(
     "automation.direct",
@@ -15,9 +17,11 @@ export async function publishStepExecution({
       executionId,
       runId,
       stepIndex,
+      iteration,
       step: { ...stepPlain, params: resolvedParams },
       previousOutput,
-      globalToken
+      globalToken,
+      loopStepId
     }))
   );
 }

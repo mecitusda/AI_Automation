@@ -3,7 +3,7 @@ import { Workflow } from "../models/workflow.model.js";
 import { Run } from "../models/run.model.js";
 import { channel } from "../config/rabbit.js";
 import { registerCronWorkflow, stopCronWorkflow  } from "../config/scheduler.js";
-
+import { plugins } from "../plugins/index.js";
 const router = express.Router();
 
 
@@ -244,6 +244,7 @@ router.post("/:id/run", async (req, res) => {
  */
 router.post("/", async (req, res) => {
   try {
+
     const {
       name,
       steps = [],
@@ -252,7 +253,33 @@ router.post("/", async (req, res) => {
       enabled = true
     } = req.body;
 
-    // 🔒 Client’tan versions gelirse ignore
+    if (!name) {
+      throw new Error("Workflow name is required");
+    }
+
+    if (!Array.isArray(steps)) {
+      throw new Error("Steps must be an array");
+    }
+
+    /* 🔹 STEP VALIDATION */
+
+    for (const step of steps) {
+
+      if (!step.id) {
+        throw new Error("Step id is required");
+      }
+
+      if (!step.type) {
+        throw new Error(`Step ${step.id} missing type`);
+      }
+      if (!plugins[step.type] && !["if", "foreach"].includes(step.type)) {
+        throw new Error(`Plugin not found: ${step.type}`);
+      }
+
+    }
+
+    /* 🔹 CREATE WORKFLOW */
+
     const workflow = await Workflow.create({
       name,
       steps,
@@ -261,6 +288,7 @@ router.post("/", async (req, res) => {
       enabled,
 
       currentVersion: 1,
+
       versions: [
         {
           version: 1,
@@ -271,19 +299,32 @@ router.post("/", async (req, res) => {
       ]
     });
 
+    /* 🔹 CRON REGISTER */
+
     if (workflow.enabled && workflow.trigger?.type === "cron") {
       registerCronWorkflow(workflow);
     }
+
+    /* 🔹 EVENT */
+
     await channel.publish(
       "automation.direct",
       "workflow.created",
-      Buffer.from(JSON.stringify({
-        workflowId: workflow._id.toString()
-      }))
+      Buffer.from(
+        JSON.stringify({
+          workflowId: workflow._id.toString()
+        })
+      )
     );
+
     res.json(workflow);
+
   } catch (err) {
-    res.status(400).json({ error: err.message });
+
+    res.status(400).json({
+      error: err.message
+    });
+
   }
 });
 

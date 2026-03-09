@@ -1,4 +1,5 @@
 export default {
+  name: "delay",
   async execute({ params, signal }) {
     const ms = params?.ms ?? 10000;
 
