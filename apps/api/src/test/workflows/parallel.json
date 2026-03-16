@@ -1,0 +1,25 @@
+{
+  "name": "Test Parallel",
+  "trigger": { "type": "manual" },
+  "steps": [
+    {
+      "id": "fetchUsers",
+      "type": "http",
+      "params": { "url": "https://jsonplaceholder.typicode.com/users" },
+      "dependsOn": []
+    },
+    {
+      "id": "logA",
+      "type": "log",
+      "params": { "message": "logA after fetch" },
+      "dependsOn": ["fetchUsers"]
+    },
+    {
+      "id": "logB",
+      "type": "log",
+      "params": { "message": "logB after fetch" },
+      "dependsOn": ["fetchUsers"]
+    }
+  ],
+  "maxParallel": 5
+}

@@ -1,24 +1,24 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { socket } from "../api/socket";
 import {
   fetchWorkflows,
   fetchWorkflowVersions,
-  rollbackWorkflow
+  rollbackWorkflow,
+  createWorkflow,
 } from "../api/workflow";
 import type {
   WorkflowSummary,
   WorkflowVersionInfo
 } from "../api/workflow";
-import { useNavigate } from "react-router-dom";
 
 export default function WorkflowsPage() {
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [versions, setVersions] = useState<
     Record<string, WorkflowVersionInfo[]>
   >({});
+  const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
-  console.log(workflows)
-  console.log(versions)
   // initial load
   useEffect(() => {
     const load = async () => {
@@ -61,9 +61,26 @@ export default function WorkflowsPage() {
     window.location.reload(); // şimdilik basit
   };
 
+  const handleCreateWorkflow = async () => {
+    setCreating(true);
+    try {
+      const w = await createWorkflow({ name: "Untitled" });
+      navigate(`/workflows/${w.id}/edit`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to create workflow");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="page">
-      <h1>Workflows</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h1 style={{ margin: 0 }}>Workflows</h1>
+        <button onClick={handleCreateWorkflow} disabled={creating}>
+          {creating ? "Creating…" : "New workflow"}
+        </button>
+      </div>
       <div className="cards">
       {workflows.map(w => (
         <div 

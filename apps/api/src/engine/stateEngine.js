@@ -6,6 +6,33 @@ export async function movePendingToRunning({
   iteration = 0,
   executionId
 }) {
+  const startedAt = new Date();
+
+  // Replay (and any flow) may already have a pending step state: update it to running.
+  const updateExisting = await Run.updateOne(
+    {
+      _id: runId,
+      status: "running",
+      stepStates: {
+        $elemMatch: {
+          stepId,
+          iteration,
+          status: "pending"
+        }
+      }
+    },
+    {
+      $set: {
+        "stepStates.$.status": "running",
+        "stepStates.$.executionId": executionId,
+        "stepStates.$.startedAt": startedAt
+      }
+    }
+  );
+
+  if (updateExisting.modifiedCount === 1) return true;
+
+  // No pending state exists (e.g. normal run): push a new running state.
   const res = await Run.updateOne(
     {
       _id: runId,
@@ -27,7 +54,7 @@ export async function movePendingToRunning({
           status: "running",
           executionId,
           retryCount: 0,
-          startedAt: new Date()
+          startedAt
         }
       }
     }

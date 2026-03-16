@@ -1,7 +1,9 @@
 export type StepState = {
   stepId: string
   retryCount: number
-  status: "pending" | "running" | "retrying" | "completed" | "failed"
+  status: "pending" | "running" | "retrying" | "completed" | "failed" | "skipped" | "cancelled"
+  iteration?: number
+  durationMs?: number
 }
 
 export type RunLog = {

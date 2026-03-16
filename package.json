@@ -6,7 +6,8 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "api": "npx nodemon apps/api/src/index.js",
-    "web": "cd apps/web && npm run dev"
+    "web": "cd apps/web && npm run dev",
+    "test:workflows": "node scripts/run-test-workflows.js"
   },
   "dependencies": {
     "amqplib": "^0.10.9",
@@ -17,6 +18,7 @@
     "express": "^4.22.1",
     "ioredis": "^5.9.3",
     "mongoose": "^9.2.1",
+    "nodemailer": "^6.9.16",
     "node-cron": "^4.2.1",
     "socket.io": "^4.8.3",
     "swagger-jsdoc": "^6.2.8",

@@ -38,10 +38,8 @@ export function resolveVariables(obj, context) {
       source = loop;
 
     } else {
-      console.log("unknown")
       return "";
     }
-    console.log("Source after root resolution:", source);
     return parts.reduce((acc, key) => {
 
   

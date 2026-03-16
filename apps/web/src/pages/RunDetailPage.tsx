@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { socket } from "../api/socket";
+import { replayRun, fetchRunDetail, type RunDetail } from "../api/run";
+import RunDebuggerPanel from "../components/RunDebuggerPanel";
 import "../styles/runs.css";
 import type { WorkflowDetail } from "../api/workflow";
 import WorkflowGraph from "../components/WorkflowGraph";
@@ -12,21 +14,22 @@ const STATUS_LEGEND = [
   { status: "failed",    color: "#ef4444", label: "Failed"    },
   { status: "retrying",  color: "#f59e0b", label: "Retrying"  },
   { status: "pending",   color: "#6b7280", label: "Pending"   },
-  { status: "skipped",   color: "#9ca3af", label: "Skipped"   },
+  { status: "skipped",   color: "#eab308", label: "Skipped"   },
   { status: "cancelled", color: "#4b5563", label: "Cancelled" },
 ];
 
 type StepState = {
   stepId: string;
   retryCount: number;
-  status: "pending" | "running" | "retrying" | "completed" | "failed";
+  status: "pending" | "running" | "retrying" | "completed" | "failed" | "skipped" | "cancelled";
   durationMs?: number;
+  iteration?: number;
 };
 
 type Log = {
   stepId: string;
   message: string;
-  level: "info" | "error" | "retry" | "system";
+  level: "info" | "warning" | "error" | "retry" | "system";
   createdAt?: string;
 };
 
@@ -73,15 +76,20 @@ function getStepColor(stepId: string) {
 
 export default function RunDetailPage() {
   const { id: runId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const [run, setRun] = useState<Run | null>(null);
   const [stepStates, setStepStates] = useState<StepState[]>([]);
   const [logs, setLogs] = useState<Log[]>([]);
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
+  const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [replayLoading, setReplayLoading] = useState(false);
+  const [replayFromStepId, setReplayFromStepId] = useState<string>("");
 
+  console.log("run", stepStates);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // initial fetch
@@ -95,6 +103,17 @@ export default function RunDetailPage() {
         setStepStates(data.stepStates ?? []);
         setLogs(data.logs ?? []);
         setLoading(false);
+      });
+  }, [runId]);
+
+  // fetch detailed run snapshot for debugger/output inspection
+  useEffect(() => {
+    if (!runId) return;
+    fetchRunDetail(runId)
+      .then((d) => setRunDetail(d))
+      .catch(() => {
+        // non-fatal; debugger panel will simply not render
+        setRunDetail(null);
       });
   }, [runId]);
   
@@ -122,17 +141,31 @@ export default function RunDetailPage() {
     };
 
     const handleLog = (log: Log) => {
-      console.log("Received log:", log);
       setLogs((prev) => [...prev, log]);
+    };
+
+    const handleStepUpdate = (payload: { runId: string; stepId: string; iteration: number; status: string }) => {
+      if (payload.runId !== runId) return;
+      setStepStates((prev) => {
+        const idx = prev.findIndex(
+          (s) => s.stepId === payload.stepId && (s.iteration ?? 0) === payload.iteration
+        );
+        if (idx < 0) return prev;
+        const next = [...prev];
+        next[idx] = { ...next[idx], status: payload.status as StepState["status"] };
+        return next;
+      });
     };
 
     socket.on("run:update", handleUpdate);
     socket.on("run:log", handleLog);
+    socket.on("step:update", handleStepUpdate);
 
     return () => {
       socket.emit("run:leave", { runId });
       socket.off("run:update", handleUpdate);
       socket.off("run:log", handleLog);
+      socket.off("step:update", handleStepUpdate);
     };
   }, [runId]);
 
@@ -180,6 +213,22 @@ export default function RunDetailPage() {
     setCancelling(false);
   }
 };
+
+  const canReplay = run && ["completed", "failed", "cancelled"].includes(run.status);
+  const replaySteps = workflow?.steps?.map((s) => s.id) ?? [...new Set((stepStates || []).map((s) => s.stepId))];
+
+  const handleReplay = async () => {
+    if (!runId || !replayFromStepId) return;
+    setReplayLoading(true);
+    try {
+      const result = await replayRun(runId, replayFromStepId);
+      navigate(`/runs/${result.runId}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Replay failed");
+    } finally {
+      setReplayLoading(false);
+    }
+  };
   if (loading) return <div className="page">Loading...</div>;
   if (!run) return <div className="page">Run not found</div>;
 
@@ -200,15 +249,38 @@ export default function RunDetailPage() {
       {cancelling ? "Cancelling..." : "Cancel Run"}
     </button>
   )}
+        {canReplay && replaySteps.length > 0 && (
+          <div style={{ marginLeft: 16, display: "flex", alignItems: "center", gap: 8, fontSize: "1.2rem", fontWeight: "bold" }}>
+            <label>Replay from:</label>
+            <select
+              value={replayFromStepId}
+              onChange={(e) => setReplayFromStepId(e.target.value)}
+              style={{ padding: "4px 8px" }}
+            >
+              <option value="">Select step</option>
+              {replaySteps.map((stepId) => (
+                <option key={stepId} value={stepId}>{stepId}</option>
+              ))}
+            </select>
+            <button onClick={handleReplay} disabled={replayLoading || !replayFromStepId}>
+              {replayLoading ? "Starting…" : "Replay from here"}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="section" style={{ marginBottom: 16 }}>
         <div className="sectionTitle">Steps</div>
 
         {stepStates.map((step) => (
-          <div key={step.stepId} className="stepRow">
+          <div key={`${step.stepId}-${step.iteration ?? 0}`} className="stepRow">
             <div>
-              <div className="stepName">{step.stepId}</div>
+              <div className="stepName">
+                {step.stepId}
+                {step.iteration !== undefined && step.iteration !== 0 && (
+                  <span style={{ marginLeft: 6, opacity: 0.8 }}>[{step.iteration}]</span>
+                )}
+              </div>
               <div className="stepMeta">
                 {step.durationMs !== undefined && <span>{step.durationMs} ms</span>}
                 {step.retryCount > 0 && <span>Retry: {step.retryCount}</span>}
@@ -222,30 +294,93 @@ export default function RunDetailPage() {
         ))}
       </div>
 
+      <div className="section" style={{ marginBottom: 16 }}>
+        <div className="sectionTitle">Run Timeline</div>
+        <div className="timelinePanel" style={{ padding: "12px 0" }}>
+          {logs
+            .filter((log) =>
+              log.message?.startsWith("[RUN START]") ||
+              log.message?.startsWith("[STEP START]") ||
+              log.message?.startsWith("[STEP COMPLETE]") ||
+              log.message?.startsWith("[STEP RETRY]") ||
+              log.message?.includes("Retry scheduled") ||
+              log.message?.startsWith("[RUN COMPLETE]") ||
+              log.message?.startsWith("[STEP TIMEOUT]") ||
+              log.message?.startsWith("[STEP FAIL]") ||
+              (log.stepId === "system" && log.message?.toLowerCase().includes("completed"))
+            )
+            .map((log, i) => {
+              let label = log.message;
+              if (log.message?.startsWith("[RUN START]")) label = "Run started";
+              else if (log.message?.startsWith("[STEP START]")) label = "Step started";
+              else if (log.message?.startsWith("[STEP COMPLETE]")) label = "Step completed";
+              else if (log.message?.startsWith("[STEP RETRY]") || log.message?.includes("Retry scheduled")) label = "Retry scheduled";
+              else if (log.message?.startsWith("[RUN COMPLETE]") || (log.stepId === "system" && log.message?.toLowerCase().includes("completed"))) label = "Run completed";
+              else if (log.message?.startsWith("[STEP TIMEOUT]")) label = "Step timeout";
+              else if (log.message?.startsWith("[STEP FAIL]")) label = "Step failed";
+              return (
+                <div key={i} className="logRow" style={{ marginBottom: 8 }}>
+                  <div className="logTime" style={{ minWidth: 80, fontSize: "1.2rem", fontWeight: "bold" }}>
+                    {log.createdAt ? new Date(log.createdAt).toLocaleTimeString() : ""}
+                  </div>
+                  <div className={`logMsg ${logKind(log.level)}`} style={{ fontSize: "1.2rem", fontWeight: "bold" }}>{label}</div>
+                  {log.stepId && log.stepId !== "system" && (
+                    <span style={{ marginLeft: 8, opacity: 0.8, color: getStepColor(log.level), fontSize: "1.2rem", fontWeight: "bold" }}>[{log.stepId}]</span>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      </div>
+
       {workflow && (
-        <div className="section" style={{ marginBottom: 20 }}>
-          <div className="sectionTitle">Execution Graph</div>
-          <div className="graph-color-info">
-            {STATUS_LEGEND.map(({ status, color, label }) => (
-              <div key={status} className="graph-color-info__item">
-                <span
-                  className="graph-color-info__dot"
-                  style={{
-                    background: color,
-                    boxShadow: ["running","completed","failed","retrying"].includes(status)
-                      ? `0 0 6px ${color}`
-                      : "none",
-                  }}
-                />
-                <span className="graph-color-info__label">{label}</span>
-              </div>
-            ))}
+        <div className="section" style={{ marginBottom: 20, display: "flex", gap: 16 }}>
+          <div style={{ flex: 2 }}>
+            <div className="sectionTitle">Execution Graph</div>
+            <div className="graph-color-info">
+              {STATUS_LEGEND.map(({ status, color, label }) => (
+                <div key={status} className="graph-color-info__item">
+                  <span
+                    className="graph-color-info__dot"
+                    style={{
+                      background: color,
+                      boxShadow: ["running","completed","failed","retrying"].includes(status)
+                        ? `0 0 6px ${color}`
+                        : "none",
+                    }}
+                  />
+                  <span className="graph-color-info__label">{label}</span>
+                </div>
+              ))}
+            </div>
+            <WorkflowGraph
+              steps={workflow.steps}
+              stepStates={stepStates}
+              onNodeClick={() => {}}
+            />
           </div>
-          <WorkflowGraph
-            steps={workflow.steps}
-            stepStates={stepStates}
-            onNodeClick={() => {}}
-          />
+          {runDetail && (
+            <div style={{ flex: 1, minWidth: 320, maxHeight: 520 }}>
+              <RunDebuggerPanel
+                detail={runDetail}
+                onReplayFromStep={
+                  canReplay && runId
+                    ? async (stepId: string) => {
+                        try {
+                          setReplayLoading(true);
+                          const result = await replayRun(runId, stepId);
+                          navigate(`/runs/${result.runId}`);
+                        } catch (err) {
+                          alert(err instanceof Error ? err.message : "Replay failed");
+                        } finally {
+                          setReplayLoading(false);
+                        }
+                      }
+                    : undefined
+                }
+              />
+            </div>
+          )}
         </div>
       )}
 

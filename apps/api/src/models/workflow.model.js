@@ -8,8 +8,14 @@ const stepSchema = new mongoose.Schema({
     default: {}
   },
   retry: { type: Number, default: 0 },
+  retryDelay: { type: Number }, // ms to wait before each retry (optional; else exponential backoff)
   dependsOn: { type: [String], default: [] },
-  timeout: { type: Number, default: 0 }
+  /** When set, this step is reached from a switch node's output handle; only run when switch output.branch matches. */
+  branch: { type: String },
+  /** When set, this step is connected from the error port of the given stepId; runs when that step fails after retries. */
+  errorFrom: { type: String },
+  timeout: { type: Number, default: 0 },
+  disabled: { type: Boolean, default: false }
 }, { _id: false });
 
 const versionSchema = new mongoose.Schema({
@@ -29,7 +35,9 @@ const workflowSchema = new mongoose.Schema({
       enum: ["manual", "cron"],
       default: "manual"
     },
-    cron: { type: String }
+    cron: { type: String },
+    schedule: { type: String },
+    webhookSecret: { type: String }
   },
 
   // 🔹 ACTIVE SNAPSHOT (legacy + convenience)

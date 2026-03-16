@@ -11,9 +11,15 @@ import { connectDB } from "./config/db.js";
 import { connectRabbit } from "./config/rabbit.js";
 import workflowRoutes from "./routes/workflow.routes.js";
 import runRoutes from "./routes/run.routes.js";
+import triggerRoutes from "./routes/trigger.routes.js";
 import { startScheduler } from "./config/scheduler.js";
 import metricRoutes from "./routes/metrics.routes.js"
 import monitoringRoutes from "./routes/monitoring.routes.js";
+import credentialRoutes from "./routes/credential.routes.js";
+import templateRoutes from "./routes/template.routes.js";
+import pluginRoutes from "./routes/plugin.routes.js";
+import userRoutes from "./routes/user.routes.js";
+import { seedTemplatesIfEmpty } from "./data/seedTemplates.js";
 
 const app = express();
 
@@ -27,6 +33,7 @@ app.use(express.json());
 
 await connectRabbit();
 await connectDB();
+await seedTemplatesIfEmpty();
 
 const httpServer = http.createServer(app);
 const io = initSocket(httpServer);
@@ -35,7 +42,12 @@ const io = initSocket(httpServer);
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use("/runs", runRoutes);
+app.use("/trigger", triggerRoutes);
 app.use("/workflows", workflowRoutes);
+app.use("/credentials", credentialRoutes);
+app.use("/templates", templateRoutes);
+app.use("/plugins", pluginRoutes);
+app.use("/users", userRoutes);
 app.use("/metrics", metricRoutes);
 app.use("/monitoring", monitoringRoutes);
 

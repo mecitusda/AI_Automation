@@ -1,0 +1,14 @@
+{
+  "name": "Test Retry",
+  "trigger": { "type": "manual" },
+  "steps": [
+    {
+      "id": "unstableStep",
+      "type": "unstable",
+      "params": { "failRate": 0.8 },
+      "dependsOn": [],
+      "retry": 3
+    }
+  ],
+  "maxParallel": 5
+}

@@ -1,0 +1,25 @@
+{
+  "name": "Test Foreach",
+  "trigger": { "type": "manual" },
+  "steps": [
+    {
+      "id": "fetchUsers",
+      "type": "http",
+      "params": { "url": "https://jsonplaceholder.typicode.com/users" },
+      "dependsOn": []
+    },
+    {
+      "id": "loopUsers",
+      "type": "foreach",
+      "params": { "items": "{{ steps.fetchUsers.0.output.data }}" },
+      "dependsOn": ["fetchUsers"]
+    },
+    {
+      "id": "logUser",
+      "type": "log",
+      "params": { "message": "User {{ loop.item.id }}" },
+      "dependsOn": ["loopUsers"]
+    }
+  ],
+  "maxParallel": 5
+}

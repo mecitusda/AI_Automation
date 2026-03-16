@@ -3,11 +3,34 @@ import { Workflow } from "../models/workflow.model.js";
 import { Run } from "../models/run.model.js";
 import { channel } from "../config/rabbit.js";
 import { registerCronWorkflow, stopCronWorkflow  } from "../config/scheduler.js";
-import { plugins } from "../plugins/index.js";
+import { validateWorkflowPayload } from "../utils/validateWorkflow.js";
+import { workflowVersionDiff } from "../utils/workflowDiff.js";
 const router = express.Router();
 
 
 // GET
+
+router.get("/:id/versions/diff", async (req, res) => {
+  try {
+    const fromV = Number(req.query.from);
+    const toV = Number(req.query.to);
+    if (!Number.isInteger(fromV) || !Number.isInteger(toV)) {
+      return res.status(400).json({ error: "Query from and to must be version numbers" });
+    }
+    const wf = await Workflow.findById(req.params.id);
+    if (!wf) return res.status(404).json({ error: "Workflow not found" });
+
+    const fromSnap = wf.versions?.find((v) => v.version === fromV);
+    const toSnap = wf.versions?.find((v) => v.version === toV);
+    if (!fromSnap) return res.status(404).json({ error: `Version ${fromV} not found` });
+    if (!toSnap) return res.status(404).json({ error: `Version ${toV} not found` });
+
+    const { added, removed, changed } = workflowVersionDiff(fromSnap.steps || [], toSnap.steps || []);
+    return res.json({ fromVersion: fromV, toVersion: toV, added, removed, changed });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+});
 
 router.get("/:id/versions", async (req, res) => {
   try {
@@ -46,6 +69,42 @@ router.get("/:id", async (req, res) => {
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /workflows/:id/steps/:stepId/output-preview
+ * Returns the step output from the latest completed/failed run for the workflow.
+ * Used by the editor to show "Preview output structure".
+ */
+router.get("/:id/steps/:stepId/output-preview", async (req, res) => {
+  try {
+    const { id: workflowId, stepId } = req.params;
+    const run = await Run.findOne({
+      workflowId,
+      status: { $in: ["completed", "failed"] }
+    })
+      .sort({ createdAt: -1 })
+      .limit(1)
+      .lean();
+
+    if (!run) {
+      return res.status(404).json({ error: "No run found for this workflow. Run the workflow first." });
+    }
+
+    const outputs = run.outputs || {};
+    const stepOutput = outputs[stepId];
+    if (stepOutput == null) {
+      return res.status(404).json({ error: "No output for this step in the latest run." });
+    }
+
+    const firstIteration = typeof stepOutput === "object" && !Array.isArray(stepOutput)
+      ? stepOutput["0"] ?? stepOutput[Object.keys(stepOutput)[0]]
+      : stepOutput;
+
+    return res.json(firstIteration);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || String(err) });
   }
 });
 
@@ -153,9 +212,20 @@ router.post("/:id/run", async (req, res) => {
       return res.status(404).json({ error: "Workflow not found" });
     }
 
+    let workflowVersion = workflow.currentVersion;
+    const bodyVersion = req.body?.workflowVersion;
+    if (bodyVersion != null && bodyVersion !== "") {
+      const v = Number(bodyVersion);
+      const hasVersion = workflow.versions?.some((ver) => ver.version === v) || v === workflow.currentVersion;
+      if (!Number.isInteger(v) || !hasVersion) {
+        return res.status(400).json({ error: "Invalid or unknown workflow version" });
+      }
+      workflowVersion = v;
+    }
+
     const run = await Run.create({
       workflowId: workflow._id,
-      workflowVersion: workflow.currentVersion,
+      workflowVersion,
       status: "queued"
     });
 
@@ -245,55 +315,24 @@ router.post("/:id/run", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
 
-    const {
-      name,
-      steps = [],
-      maxParallel = 5,
-      trigger = { type: "manual" },
-      enabled = true
-    } = req.body;
-
-    if (!name) {
-      throw new Error("Workflow name is required");
-    }
-
-    if (!Array.isArray(steps)) {
-      throw new Error("Steps must be an array");
-    }
-
-    /* 🔹 STEP VALIDATION */
-
-    for (const step of steps) {
-
-      if (!step.id) {
-        throw new Error("Step id is required");
-      }
-
-      if (!step.type) {
-        throw new Error(`Step ${step.id} missing type`);
-      }
-      if (!plugins[step.type] && !["if", "foreach"].includes(step.type)) {
-        throw new Error(`Plugin not found: ${step.type}`);
-      }
-
-    }
+    const validated = validateWorkflowPayload(req.body);
 
     /* 🔹 CREATE WORKFLOW */
 
     const workflow = await Workflow.create({
-      name,
-      steps,
-      maxParallel,
-      trigger,
-      enabled,
+      name: validated.name,
+      steps: validated.steps,
+      maxParallel: validated.maxParallel,
+      trigger: validated.trigger,
+      enabled: validated.enabled,
 
       currentVersion: 1,
 
       versions: [
         {
           version: 1,
-          steps,
-          maxParallel,
+          steps: validated.steps,
+          maxParallel: validated.maxParallel,
           createdAt: new Date()
         }
       ]
@@ -325,6 +364,84 @@ router.post("/", async (req, res) => {
       error: err.message
     });
 
+  }
+});
+
+/**
+ * Validate variables for a workflow definition.
+ * POST /workflows/:id/validate-variables
+ * Body: { steps?: Step[] } (optional; if omitted, uses current workflow definition)
+ * Returns: { variables: { path: string; ok: boolean; error?: string }[] }
+ */
+router.post("/:id/validate-variables", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const wf = await Workflow.findById(id).lean();
+    if (!wf) return res.status(404).json({ error: "Workflow not found" });
+
+    // Use provided steps if any, otherwise current workflow steps
+    const steps = Array.isArray(req.body?.steps) && req.body.steps.length > 0
+      ? req.body.steps
+      : (wf.steps || []);
+
+    const stepIds = new Set(steps.map((s) => s.id));
+    const vars = [];
+    const VAR_REGEX = /\{\{\s*([^}]+?)\s*\}\}/g;
+
+    for (const step of steps) {
+      const params = step.params || {};
+      for (const [key, value] of Object.entries(params)) {
+        if (typeof value !== "string") continue;
+        const str = value;
+        let match;
+        const seen = new Set();
+        while ((match = VAR_REGEX.exec(str)) !== null) {
+          const expr = match[1].trim();
+          if (!expr || seen.has(expr)) continue;
+          seen.add(expr);
+
+          const parts = expr.split(".").filter(Boolean);
+          if (parts.length === 0) {
+            vars.push({ path: expr, ok: false, error: "Empty variable expression" });
+            continue;
+          }
+
+          // Basic root validation
+          const root = parts[0];
+          if (!["trigger", "steps", "loop", "run"].includes(root)) {
+            vars.push({ path: expr, ok: false, error: `Unknown root "${root}" in variable "${expr}"` });
+            continue;
+          }
+
+          if (root === "steps") {
+            const stepId = parts[1];
+            if (!stepId) {
+              vars.push({ path: expr, ok: false, error: `Step id missing in "${expr}"` });
+              continue;
+            }
+            if (!stepIds.has(stepId)) {
+              vars.push({ path: expr, ok: false, error: `Unknown step "${stepId}" in "${expr}"` });
+              continue;
+            }
+          }
+
+          if (root === "loop") {
+            const seg = parts[1];
+            if (!["item", "index"].includes(seg || "")) {
+              vars.push({ path: expr, ok: false, error: `Loop variable must start with item or index in "${expr}"` });
+              continue;
+            }
+          }
+
+          // For now, nested keys are not deeply validated here
+          vars.push({ path: expr, ok: true });
+        }
+      }
+    }
+
+    res.json({ variables: vars });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

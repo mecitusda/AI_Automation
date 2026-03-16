@@ -1,26 +1,25 @@
 export default {
-  name: "delay",
-  async execute({ params, signal }) {
-    const ms = params?.ms ?? 10000;
-
-    console.log(`[DELAY] Started for ${ms} ms`);
-    const start = Date.now();
+  type: "delay",
+  label: "Delay",
+  category: "control",
+  schema: [
+    { key: "ms", type: "number", label: "Delay (ms)", default: 1000, placeholder: "1000" },
+  ],
+  output: {
+    type: "object",
+    properties: { delayed: { type: "number" } },
+  },
+  executor: async ({ params, signal }) => {
+    const ms = params?.ms ?? 1000;
     await new Promise((resolve, reject) => {
-      
-      const timeout = setTimeout(() => {
-        console.log("[DELAY] Finished normally");
-        resolve();
-      }, ms);
-
+      const timeout = setTimeout(resolve, ms);
       if (signal) {
         signal.addEventListener("abort", () => {
-          console.log("[DELAY] ABORTED and timeout for aborted: ",Date.now() - start);
           clearTimeout(timeout);
-          reject(new Error("Timeout exceeded"));
+          reject(new Error("Aborted"));
         });
       }
     });
-
-    return { delayed: ms };
-  }
+    return { success: true, output: { delayed: ms } };
+  },
 };

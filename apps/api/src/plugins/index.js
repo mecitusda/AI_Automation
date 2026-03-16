@@ -5,23 +5,25 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/** @deprecated Use getPluginRegistry() / getPlugin(type) instead. Kept for backward compatibility. */
 export const plugins = {};
 
 const files = fs.readdirSync(__dirname);
 
 for (const file of files) {
-
-  if (file === "index.js" || !file.endsWith(".js")) continue;
+  if (file === "index.js" || file === "registry.js" || !file.endsWith(".js")) continue;
 
   const module = await import(`./${file}`);
-
   const plugin = module.default ?? Object.values(module)[0];
 
-  if (!plugin?.name) {
-    throw new Error(`Plugin in ${file} must export { name }`);
+  if (!plugin?.type) {
+    throw new Error(`Plugin in ${file} must export { type }`);
   }
 
-  plugins[plugin.name] = plugin;
+  plugins[plugin.type] = plugin;
 }
+
+// Alias for backward compatibility
+if (plugins.openai) plugins.ai = plugins.openai;
 
 console.log("Loaded plugins:", Object.keys(plugins));

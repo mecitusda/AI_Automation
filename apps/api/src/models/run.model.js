@@ -10,7 +10,8 @@ const stepSchema = new mongoose.Schema({
   },
   retry: { type: Number, default: 0 },
   dependsOn: { type: [String], default: [] },
-  timeout: { type: Number, default: 0 }
+  timeout: { type: Number, default: 0 },
+  disabled: { type: Boolean, default: false }
 }, { _id: false });
 
 const stepStateSchema = new mongoose.Schema({
@@ -94,13 +95,20 @@ const runSchema = new mongoose.Schema({
     default: {}
   },
 
+  /** Set when execution is routed to an error-handler step; cleared after handler runs. */
+  lastError: {
+    stepId: String,
+    message: String,
+    iteration: Number
+  },
+
   logs: [
     {
       stepId: String,
       message: String,
       level: {
         type: String,
-        enum: ["info", "error", "retry", "system"],
+        enum: ["info", "warning", "error", "retry", "system"],
         default: "info"
       },
       createdAt: { type: Date, default: Date.now }

@@ -1,6 +1,8 @@
 /* ========== BASE ========== */
 *{
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 html{
@@ -8,7 +10,6 @@ html{
 }
 
 body{
-  margin:0;
   font-family: Inter, system-ui, -apple-system, sans-serif;
   background:#0b0f17;
   color:#e6edf3;
@@ -73,7 +74,7 @@ body{
   border-radius:16px;
   padding:22px;
   transition: all .25s ease;
-
+  
 }
 
 .card:hover{
@@ -170,7 +171,7 @@ body{
     border: 2px solid transparent;
     border-top-color: var(--blue);
     border-right-color: var(--blue);
-    animation: orbit 0.9s cubic-bezier(0.4,0,0.2,1) infinite;
+    animation: orbit 0.9s cubic-bezier(0,0,1,1) infinite;
     filter: drop-shadow(0 0 6px var(--blue));
   }
   @keyframes orbit {

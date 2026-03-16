@@ -22,7 +22,284 @@
   color: #e5e7eb;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
   animation: scaleIn 0.15s ease-out;
+  height: 90%;
+  overflow-y: auto;
+  
 }
+
+.modalCard::-webkit-scrollbar {
+  width: 5px;
+}
+.modalCard::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 12px 0;
+}
+.modalCard::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 99px;
+}
+.modalCard::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.28);
+}
+.modalCard--wide {
+  width: 560px;
+}
+
+/* Step edit modal: fixed width, editor + variables panel */
+.modalCard--stepEdit {
+  width: 900px;
+  max-width: 90vw;
+  height: min(900px, 85vh);
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.stepEditModal__layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.stepEditModal__editor {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px;
+}
+
+.stepEditModal__editor h2 {
+  margin: 0 0 20px 0;
+}
+
+.stepEditModal__variablePanel {
+  width: 340px;
+  min-width: 320px;
+  max-width: 360px;
+  flex-shrink: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0f172a;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* VariablesPanel: sticky header + scroll */
+.variables-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+}
+
+.variables-panel__header {
+  flex-shrink: 0;
+  padding: 16px 16px 8px;
+  background: #0f172a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.variables-panel__title {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.variables-panel__hint {
+  margin: 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.variables-panel__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 0 16px 16px;
+}
+
+.variables-panel__footer {
+  margin-top: 12px;
+  padding-right: 16px;
+}
+
+.stepEditModal__variablePanelRunHint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0 0 12px 0;
+}
+
+/* Variable tree list (no ul/li) */
+.stepEditModal__variablePanel .variable-tree,
+.variables-panel .variable-tree {
+  overflow: visible;
+  max-height: none;
+  min-width: 0;
+}
+
+.variables-panel .variable-tree__list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  max-height: none;
+  overflow: visible;
+  border: none;
+  background: transparent;
+}
+
+/* VariableNode: tree connector lines (vertical + horizontal branches) */
+.variable-node {
+  position: relative;
+}
+
+/* Shared line color and crisp rendering */
+.variable-node__children,
+.variable-node--parent.variable-node--open .variable-node__row::after,
+.variable-node--child .variable-node__row::before {
+  --variable-line: rgba(255, 255, 255, 0.2);
+}
+
+/* Vertical line originates from center of parent's +/− box, runs down through children */
+.variable-node__children {
+  position: relative;
+  border-left: 1px solid var(--variable-line);
+  margin-left: var(--variable-children-margin, 17px);
+  padding-left: 0;
+  transform: translateZ(0);
+}
+
+/* Stub: vertical from center of parent's +/− down to where children vertical continues */
+
+
+/* Last child: vertical line stops at horizontal branch (L-shape), no line below */
+.variable-node__children .variable-node--last::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  bottom: 0;
+  width: 2px;
+  background: #0f172a;
+  pointer-events: none;
+}
+
+.variable-node--child .variable-node__row {
+  position: relative;
+}
+
+/* Horizontal line from vertical to the left edge of this row's +/− box */
+.variable-node--child .variable-node__row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: var(--variable-connector-width, 22px);
+  height: 1px;
+  background: var(--variable-line);
+  margin-top: 0;
+  box-sizing: border-box;
+  transform: translateZ(0);
+}
+
+.variable-node__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: #e5e7eb;
+  border-radius: 4px;
+  transition: background 0.12s ease;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.variable-node__row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.variable-node__row--root .variable-node__label {
+  font-weight: 500;
+}
+
+.variable-node__row--leaf .variable-node__label {
+  color: #93c5fd;
+}
+
+.variable-node__row--leaf:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* + / − toggle in small square box (collapsed = +, expanded = −) */
+.variable-node__toggle {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #9ca3af;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.variable-node__toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #d1d5db;
+}
+
+.variable-node__toggle:focus {
+  outline: none;
+}
+
+.variable-node__toggle:focus-visible {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.5);
+}
+
+.variable-node__toggle-spacer {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.variable-node__label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.stepEditModal__outputPreview {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #334155;
+}
+
+.stepEditModal__outputPreview button,
+.stepEditModal__outputPreview select {
+  font-size: 12px;
+}
+
 
 /* Title */
 .modalCard h2 {
@@ -46,6 +323,12 @@
   color: #9ca3af;
 }
 
+.form-error {
+  color: #f87171;
+  font-size: 12px;
+  margin-left: 8px;
+}
+
 /* Params block */
 .modalCard pre {
   background: #0b1220;
@@ -56,6 +339,16 @@
   overflow-x: auto;
   margin-top: 8px;
   color: #93c5fd;
+}
+
+/* Variable highlight in textareas */
+.variable-chunk {
+  background: rgba(59, 130, 246, 0.15);
+  border-radius: 2px;
+}
+
+.variable-highlight-overlay::-webkit-scrollbar {
+  display: none;
 }
 
 /* Close button */

@@ -130,11 +130,33 @@ async function pumpReadyRuns({ io }) {
   }
 }
 
+const LAST_EMITTED_MAX = 200;
+const lastEmittedByRunId = new Map();
+
+function runStateSignature(run) {
+  const steps = (run.stepStates || []).map(s => ({
+    stepId: s.stepId,
+    iteration: s.iteration ?? 0,
+    status: s.status
+  }));
+  return JSON.stringify({ status: run.status, steps, logsLen: (run.logs || []).length });
+}
+
 function emitRunUpdate(run, io) {
   if (!io) return;
 
+  const runId = run._id?.toString?.() ?? String(run._id);
+  const sig = runStateSignature(run);
+  const last = lastEmittedByRunId.get(runId);
+  if (last && last === sig) return;
+  lastEmittedByRunId.set(runId, sig);
+  if (lastEmittedByRunId.size > LAST_EMITTED_MAX) {
+    const firstKey = lastEmittedByRunId.keys().next().value;
+    if (firstKey !== undefined) lastEmittedByRunId.delete(firstKey);
+  }
+
   const payload = {
-    id: run._id.toString(),
+    id: runId,
     status: run.status,
     currentStepIndex: run.currentStepIndex,
     finishedAt: run.finishedAt,
@@ -153,6 +175,16 @@ function emitRunUpdate(run, io) {
 function emitRunLog(runId, log, io) {
   if (!io) return;
   io.to(`run:${runId}`).emit("run:log", log);
+}
+
+function emitStepUpdate(runId, stepId, iteration, status, io) {
+  if (!io) return;
+  io.to(`run:${runId}`).emit("step:update", {
+    runId: runId?.toString?.() ?? String(runId),
+    stepId,
+    iteration: iteration ?? 0,
+    status
+  });
 } 
 
 async function addRunLog(runId, logEntry, io) {
@@ -167,6 +199,14 @@ async function addRunLog(runId, logEntry, io) {
 
 function toPlain(stepDoc) {
   return typeof stepDoc?.toObject === "function" ? stepDoc.toObject() : stepDoc;
+}
+
+/** Run.loopState is a Mongoose Map; use .get() or fallback to bracket notation for plain objects. */
+function getLoopState(run, stepId) {
+  const ls = run?.loopState;
+  if (!ls) return undefined;
+  if (typeof ls.get === "function") return ls.get(stepId);
+  return ls[stepId];
 }
 
 function getStepState(run, stepId, iteration = 0) {
@@ -187,25 +227,34 @@ function getStepState(run, stepId, iteration = 0) {
   return st;
 }
 
-function depsSatisfied(run, dependsOn = [], iteration = 0, activeLoopStepId = null) {
+function depsSatisfied(run, dependsOn = [], iteration = 0, activeLoopStepId = null, stepPlain = null) {
   if (!dependsOn?.length) return true;
 
   return dependsOn.every(depId => {
     // loop child step için özel kural:
-    // foreach step completed olmayı bekleme, aktif loop context yeterli
-    if (
-      activeLoopStepId &&
-      depId === activeLoopStepId &&
-      run.loopContext?.loopStepId === activeLoopStepId &&
-      (run.loopContext?.index ?? 0) === iteration
-    ) {
-      return true;
+    // foreach step completed olmayı bekleme; aktif loop context veya loopState index yeterli
+    if (activeLoopStepId && depId === activeLoopStepId) {
+      if (
+        run.loopContext?.loopStepId === activeLoopStepId &&
+        (run.loopContext?.index ?? 0) === iteration
+      ) {
+        return true;
+      }
+      // Step order: child may be checked before foreach sets loopContext; allow if loopState is at this iteration
+      const loopState = getLoopState(run, activeLoopStepId);
+      if (loopState && (loopState.index ?? 0) === iteration) {
+        return true;
+      }
+      return false;
     }
 
     const st = run.stepStates.find(
       s => s.stepId === depId && (s.iteration ?? 0) === iteration
     );
 
+    if (stepPlain?.errorFrom === depId && run?.lastError?.stepId === depId && st?.status === "failed") {
+      return true;
+    }
     return st && (st.status === "completed" || st.status === "skipped");
   });
 }
@@ -223,32 +272,69 @@ function buildPrevOutput(run, dependsOn = [], iteration = 0) {
   return obj;
 }
 
+/** For error-handler steps (errorFrom), returns lastError payload; otherwise buildPrevOutput. */
+function getPreviousOutput(run, stepPlain, iteration = 0) {
+  const errFrom = stepPlain?.errorFrom;
+  const lastErr = run?.lastError;
+  if (errFrom && lastErr && lastErr.stepId === errFrom && (lastErr.iteration ?? 0) === (iteration ?? 0)) {
+    return { error: lastErr.message, stepId: lastErr.stepId, iteration: lastErr.iteration };
+  }
+  return buildPrevOutput(run, stepPlain?.dependsOn ?? [], iteration);
+}
+
+/**
+ * True if this step is inside the loop: it depends on loopStepId directly or transitively.
+ * Only such steps should use loop iteration; steps like HTTP before the loop must stay at iteration 0.
+ */
+function isStepInsideLoop(stepId, loopStepId, workflow) {
+  const steps = workflow.steps || [];
+  const visited = new Set();
+  function dependsOnLoop(id) {
+    if (visited.has(id)) return false;
+    visited.add(id);
+    const step = steps.find(s => s.id === id);
+    if (!step?.dependsOn?.length) return false;
+    if (step.dependsOn.includes(loopStepId)) return true;
+    return step.dependsOn.some(depId => dependsOnLoop(depId));
+  }
+  return dependsOnLoop(stepId);
+}
+
+/**
+ * All steps that belong to this loop iteration: direct children of the loop
+ * plus any step that depends (transitively) on one of them. We must wait for
+ * all of these to complete before advancing the loop so that loopContext
+ * (loop.item) is still available when resolving params for steps like email/log.
+ */
 function isLoopIterationDone(run, loopStepId, iteration, workflow) {
-  const childSteps = workflow.steps.filter(
-    s => s.dependsOn?.includes(loopStepId)
-  );
+  const steps = workflow.steps || [];
 
-  if (!childSteps.length) return true;
-
-  for (const step of childSteps) {
-    const st = run.stepStates.find(
-      s =>
-        s.stepId === step.id &&
-        (s.iteration ?? 0) === iteration
-    );
-
-    if (!st) return false;
-
-    if (!["completed", "skipped"].includes(st.status)) {
-      return false;
+  const inIteration = new Set();
+  function addDescendants(stepId) {
+    if (inIteration.has(stepId)) return;
+    inIteration.add(stepId);
+    for (const s of steps) {
+      if (s.dependsOn?.includes(stepId)) addDescendants(s.id);
     }
   }
+  for (const s of steps) {
+    if (s.dependsOn?.includes(loopStepId)) addDescendants(s.id);
+  }
 
+  if (!inIteration.size) return true;
+
+  for (const stepId of inIteration) {
+    const st = run.stepStates.find(
+      s => s.stepId === stepId && (s.iteration ?? 0) === iteration
+    );
+    if (!st) return false;
+    if (!["completed", "skipped"].includes(st.status)) return false;
+  }
   return true;
 }
 
 
-async function handleIfStepDAG({ workflow, run, stepIndex, io }) {
+async function handleIfStepDAG({ workflow, run, stepIndex, iteration = 0, io }) {
 
   
   const step = workflow.steps[stepIndex];
@@ -273,10 +359,20 @@ async function handleIfStepDAG({ workflow, run, stepIndex, io }) {
 
   const rejected = ok ? elseGoto : thenGoto;
 
+  // Rejected branch'i skip edebilmek için hedef adımların stepState'i olmalı (yoksa skipBranch bulamaz).
+  const runId = run._id.toString();
+  if (typeof thenGoto === "string" && thenGoto.trim()) {
+    await ensurePendingStepState({ runId, stepId: thenGoto, iteration: iteration ?? 0 });
+  }
+  if (typeof elseGoto === "string" && elseGoto.trim()) {
+    await ensurePendingStepState({ runId, stepId: elseGoto, iteration: iteration ?? 0 });
+  }
+  const runWithBranchStates = await Run.findById(runId);
+  const runForSkip = runWithBranchStates || run;
 
   // rejected branch'i skip et
   if (rejected) {
-    await skipBranch(workflow, run._id.toString(), run, rejected, io);
+    await skipBranch(workflow, runId, runForSkip, rejected, iteration, io);
   }
 
   const finishedAt = new Date();
@@ -288,7 +384,7 @@ async function handleIfStepDAG({ workflow, run, stepIndex, io }) {
       stepStates: {
         $elemMatch: {
           stepId,
-          iteration: 0,
+          iteration: iteration ?? 0,
           status: "pending"
         }
       }
@@ -297,7 +393,7 @@ async function handleIfStepDAG({ workflow, run, stepIndex, io }) {
       $set: {
         "stepStates.$.status": "completed",
         "stepStates.$.finishedAt": finishedAt,
-        [`outputs.${stepId}.0`]: { result: ok }
+        [`outputs.${stepId}.${iteration ?? 0}`]: { result: ok }
       }
     }
   );
@@ -307,7 +403,7 @@ async function handleIfStepDAG({ workflow, run, stepIndex, io }) {
     run._id.toString(),
     {
       stepId,
-      message: "Step completed",
+      message: "[STEP COMPLETE] (IF step)",
       level: "info",
       createdAt: new Date()
     },
@@ -315,6 +411,7 @@ async function handleIfStepDAG({ workflow, run, stepIndex, io }) {
   );
   const updatedRun = await Run.findById(run._id);
   emitRunUpdate(updatedRun, io);
+  return { selectedStepId: ok ? thenGoto : elseGoto };
 }
 
 async function dispatchReadySteps({
@@ -324,7 +421,7 @@ async function dispatchReadySteps({
   io
 }) {
 
-  const run = await Run.findById(runId);
+  let run = await Run.findById(runId);
   if (!run) return;
   if (["failed", "completed", "cancelled"].includes(run.status)) return;
 
@@ -347,22 +444,38 @@ async function dispatchReadySteps({
     const stepPlain = toPlain(workflow.steps[i]);
 
     let iteration = 0;
-    if (stepPlain.type !== "if" && stepPlain.type !== "foreach") {
+    let activeLoopStepIdForDeps = null;
+    // For both normal steps and IF steps: use loop context only for steps *inside* the loop
+    // (they depend on the foreach). Steps before the loop (e.g. HTTP) must stay at iteration 0.
+    if (stepPlain.type !== "foreach") {
       if (run.loopContext?.loopStepId) {
-        iteration = run.loopContext.index ?? 0;
+        if (isStepInsideLoop(stepPlain.id, run.loopContext.loopStepId, workflow)) {
+          iteration = run.loopContext.index ?? 0;
+          activeLoopStepIdForDeps = run.loopContext.loopStepId;
+        }
       } else {
         const parentLoop = workflow.steps.find(s =>
           s.id !== stepPlain.id &&
           stepPlain.dependsOn?.includes(s.id) &&
           s.type === "foreach"
         );
-      
+
         if (parentLoop) {
-          iteration = run.loopState?.[parentLoop.id]?.index ?? 0;
+          iteration = (getLoopState(run, parentLoop.id)?.index ?? 0);
+          activeLoopStepIdForDeps = parentLoop.id;
+        }
+        // When loopContext is unset but step is inside a loop, that loop has finished —
+        // don't run this step again (would use wrong iteration or no loop.item).
+        const ls = run.loopState;
+        const loopIds = ls instanceof Map ? [...ls.keys()] : (ls ? Object.keys(ls) : []);
+        if (!run.loopContext?.loopStepId && loopIds.length > 0) {
+          const insideFinishedLoop = loopIds.some(
+            loopId => isStepInsideLoop(stepPlain.id, loopId, workflow)
+          );
+          if (insideFinishedLoop) continue;
         }
       }
     }
-    console.log("[STEP CHECK]", iteration)
     const stepState = run.stepStates.find(
       s => s.stepId === stepPlain.id && (s.iteration ?? 0) === iteration
     );
@@ -376,6 +489,42 @@ async function dispatchReadySteps({
 
     if (st.status !== "pending") continue;
 
+    /* ================= DISABLED STEP ================= */
+    if (stepPlain.disabled) {
+      await ensurePendingStepState({
+        runId,
+        stepId: stepPlain.id,
+        iteration
+      });
+      await Run.updateOne(
+        { _id: runId },
+        {
+          $set: {
+            "stepStates.$[s].status": "skipped",
+            "stepStates.$[s].finishedAt": new Date(),
+            [`outputs.${stepPlain.id}.${iteration}`]: null
+          }
+        },
+        {
+          arrayFilters: [
+            { "s.stepId": stepPlain.id, "s.iteration": iteration, "s.status": "pending" }
+          ]
+        }
+      );
+      await addRunLog(
+        runId,
+        { stepId: stepPlain.id, message: "Step disabled", createdAt: new Date(), level: "system" },
+        io
+      );
+      emitStepUpdate(runId, stepPlain.id, iteration, "skipped", io);
+      return dispatchReadySteps({
+        runId,
+        channel,
+        resolveVariables,
+        io
+      });
+    }
+
     /* ================= IF STEP ================= */
 
     if (stepPlain.type === "if") {
@@ -383,24 +532,33 @@ async function dispatchReadySteps({
       await ensurePendingStepState({
         runId,
         stepId: stepPlain.id,
-        iteration: 0
+        iteration
       });
 
-      if (depsSatisfied(run, stepPlain.dependsOn, 0)) {
+      if (depsSatisfied(run, stepPlain.dependsOn, iteration, activeLoopStepIdForDeps, stepPlain)) {
 
-        await handleIfStepDAG({
+        const ifResult = await handleIfStepDAG({
           workflow,
           run,
           stepIndex: i,
+          iteration,
           io
         });
 
-        return dispatchReadySteps({
-          runId,
-          channel,
-          resolveVariables,
-          io
-        });
+        run = await Run.findById(runId);
+        if (!run) return;
+        const selectedStepId = ifResult?.selectedStepId;
+        if (typeof selectedStepId === "string" && selectedStepId.trim()) {
+          const j = workflow.steps.findIndex(s => s.id === selectedStepId);
+          if (j >= 0 && !readyIndexes.some(r => r.index === j && r.iteration === iteration)) {
+            readyIndexes.push({
+              index: j,
+              iteration,
+              loopStepId: activeLoopStepIdForDeps ?? undefined
+            });
+          }
+        }
+        continue;
       }
 
       continue;
@@ -418,7 +576,7 @@ async function dispatchReadySteps({
 
       if (!depsSatisfied(run, stepPlain.dependsOn, 0)) continue;
 
-      let loopState = run.loopState?.[stepPlain.id];
+      let loopState = getLoopState(run, stepPlain.id);
       let items;
 
       /* FIRST ITERATION */
@@ -426,12 +584,39 @@ async function dispatchReadySteps({
       if (!loopState) {
 
         const context = buildContext(run);
-
         items = resolveVariables(stepPlain.params?.items, context);
-
+        console.log("items", items);
         if (!Array.isArray(items)) {
-          throw new Error("foreach items must be array");
+          if (typeof items === "string") {
+            try {
+              const parsed = JSON.parse(items);
+              if (Array.isArray(parsed)) items = parsed;
+            } catch {
+              // ignore
+            }
+          }
+          if (!Array.isArray(items) && items && typeof items === "object" && typeof items.output !== "undefined") {
+            const inner = items.output;
+            if (Array.isArray(inner)) items = inner;
+            else if (typeof inner === "string") {
+              try {
+                const parsed = JSON.parse(inner);
+                if (Array.isArray(parsed)) items = parsed;
+              } catch {
+                // ignore
+              }
+            }
+          }
+          if (!Array.isArray(items)) {
+            throw new Error("foreach items must be array");
+          }
         }
+
+        const initialLoopContext = {
+          loopStepId: stepPlain.id,
+          index: 0,
+          item: items[0] ?? null
+        };
 
         await Run.updateOne(
           { _id: runId },
@@ -440,7 +625,8 @@ async function dispatchReadySteps({
               [`loopState.${stepPlain.id}`]: {
                 index: 0,
                 items
-              }
+              },
+              loopContext: initialLoopContext
             }
           }
         );
@@ -456,16 +642,7 @@ async function dispatchReadySteps({
       items = loopState.items;
 
       const currentIndex = loopState.index ?? 0;
-      console.log("[FOREACH]", {
-  runId,
-  stepId: stepPlain.id,
-  currentIndex,
-  loopState,
-  loopContext: run.loopContext,
-  childSteps: workflow.steps
-    .filter(s => s.dependsOn?.includes(stepPlain.id))
-    .map(s => s.id)
-});
+
       /* LOOP FINISHED */
 
       if (currentIndex >= items.length) {
@@ -511,24 +688,55 @@ async function dispatchReadySteps({
         currentIndex,
         workflow
       );
-      console.log("[FOREACH ITERATION CHECK]", {
-  runId,
-  stepId: stepPlain.id,
-  currentIndex,
-  iterationDone
-});
       if (iterationDone) {
 
-        await Run.updateOne(
-          { _id: runId },
-          {
-            $inc: {
-              [`loopState.${stepPlain.id}.index`]: 1
+        const nextIndex = currentIndex + 1;
+
+        if (nextIndex >= items.length) {
+          await Run.updateOne(
+            {
+              _id: runId,
+              stepStates: {
+                $elemMatch: {
+                  stepId: stepPlain.id,
+                  iteration: 0,
+                  status: "pending"
+                }
+              }
             },
-            $unset: {
-              loopContext: ""
+            {
+              $inc: { [`loopState.${stepPlain.id}.index`]: 1 },
+              $unset: { loopContext: "" },
+              $set: {
+                "stepStates.$.status": "completed",
+                "stepStates.$.finishedAt": new Date()
+              }
             }
-          }
+          );
+        } else {
+          const nextLoopContext = {
+            loopStepId: stepPlain.id,
+            index: nextIndex,
+            item: items[nextIndex] ?? null
+          };
+          await Run.updateOne(
+            { _id: runId },
+            {
+              $inc: { [`loopState.${stepPlain.id}.index`]: 1 },
+              $set: { loopContext: nextLoopContext }
+            }
+          );
+        }
+
+        await addRunLog(
+          runId,
+          {
+            stepId: stepPlain.id,
+            message: `[FOREACH ITERATION] ${stepPlain.id} advanced to index ${nextIndex}`,
+            createdAt: new Date(),
+            level: "system"
+          },
+          io
         );
 
         return dispatchReadySteps({
@@ -573,47 +781,66 @@ async function dispatchReadySteps({
     /* ================= NORMAL STEP ================= */
 
     const loopIteration = iteration;
-const loopStepId = run.loopContext?.loopStepId ?? null;
+const loopStepId = run.loopContext?.loopStepId ?? activeLoopStepIdForDeps ?? null;
 
 const depsOk = depsSatisfied(
   run,
   stepPlain.dependsOn,
   loopIteration,
-  loopStepId
+  loopStepId,
+  stepPlain
 );
 
-    console.log("[READY CHECK]", {
-  runId,
-  stepId: stepPlain.id,
-  iteration,
-  loopContext: run.loopContext,
-  loopState: run.loopState,
-  depsOk
-});
     if (depsOk) {
 
-      readyIndexes.push({
-        index: i,
-        iteration: loopIteration,
-        loopStepId
-      });
+      if (!readyIndexes.some(r => r.index === i && r.iteration === loopIteration)) {
+        readyIndexes.push({
+          index: i,
+          iteration: loopIteration,
+          loopStepId
+        });
+      }
     }
   }
 
   const limited = readyIndexes.slice(0, availableSlots);
 
-  if (!limited.length) return;
+  if (!limited.length) {
+    if (runningCount === 0) {
+      await addRunLog(
+        runId,
+        {
+          stepId: "system",
+          message: `[RUN] No ready steps and no running steps; exiting without re-enqueue runId=${runId}`,
+          createdAt: new Date(),
+          level: "system"
+        },
+        io
+      );
+    }
+    return;
+  }
 
   for (const item of limited) {
 
     const stepPlain = toPlain(workflow.steps[item.index]);
 
     if (stepPlain.type === "foreach" || stepPlain.type === "if") {
-      console.warn("IF and FOREACH should not reach execution phase");
       continue;
     }
 
     const executionId = randomUUID();
+
+    await addRunLog(
+      runId,
+      {
+        stepId: stepPlain.id,
+        message: `[STEP READY] ${stepPlain.id} iteration=${item.iteration ?? 0}`,
+        createdAt: new Date(),
+        level: "system"
+      },
+      io
+    );
 
     const globalToken = await acquireGlobalSlot({
       runId,
@@ -625,6 +852,12 @@ const depsOk = depsSatisfied(
       await enqueueReadyRun(runId);
       continue;
     }
+
+    await ensurePendingStepState({
+      runId,
+      stepId: stepPlain.id,
+      iteration: item.iteration ?? 0
+    });
 
     const moved = await movePendingToRunning({
       runId,
@@ -638,11 +871,9 @@ const depsOk = depsSatisfied(
       continue;
     }
 
-    const previousOutput = buildPrevOutput(
-      run,
-      stepPlain.dependsOn,
-      item.iteration ?? 0
-    );
+    emitStepUpdate(runId, stepPlain.id, item.iteration ?? 0, "running", io);
+
+    const previousOutput = getPreviousOutput(run, stepPlain, item.iteration ?? 0);
 
     const resolvedParams = resolveVariables(
       stepPlain.params ?? {},
@@ -653,7 +884,7 @@ const depsOk = depsSatisfied(
       runId,
       {
         stepId: stepPlain.id,
-        message: "Step started",
+        message: `[STEP START] ${stepPlain.id} iteration=${item.iteration ?? 0} executionId=${executionId}`,
         createdAt: new Date(),
         level: "system"
       },
@@ -716,7 +947,7 @@ function isRunDone(workflow, run) {
     const s = toPlain(sdoc);
 
     if (s.type === "foreach") {
-      const loop = run.loopState?.[s.id];
+      const loop = getLoopState(run, s.id);
       const loopDone = !loop || loop.index >= (loop.items?.length ?? 0);
 
       const st = run.stepStates.find(
@@ -734,9 +965,11 @@ function isRunDone(workflow, run) {
   });
 }
 
-async function skipBranch(workflow, runId, run, rootStepId, io) {
+async function skipBranch(workflow, runId, run, rootStepId, iteration = 0, io) {
 
-  const byId = new Map(run.stepStates.map(s => [s.stepId, s]));
+  const iter = iteration ?? 0;
+  const stepStatesInIter = run.stepStates.filter(s => (s.iteration ?? 0) === iter);
+  const byId = new Map(stepStatesInIter.map(s => [s.stepId, s]));
   const skippedIds = [];
 
   function canStillRun(step) {
@@ -776,7 +1009,7 @@ async function skipBranch(workflow, runId, run, rootStepId, io) {
     },
     {
       arrayFilters: [
-        { "s.stepId": { $in: skippedIds }, "s.status": "pending" }
+        { "s.stepId": { $in: skippedIds }, "s.iteration": iter, "s.status": "pending" }
       ]
     }
   );
@@ -791,6 +1024,32 @@ async function skipBranch(workflow, runId, run, rootStepId, io) {
   );
 }
 
+/**
+ * When a switch step completes, skip downstream steps whose branch does not match the switch output.
+ * Steps that dependOn the switch step are kept only if step.branch is undefined or === selectedBranch.
+ */
+async function skipNonMatchingSwitchBranches(workflow, runId, run, switchStepId, selectedBranch, io) {
+  if (selectedBranch == null || selectedBranch === "") return;
+  const steps = workflow.steps || [];
+  const runAgain = await Run.findById(runId);
+  const currentRun = runAgain || run;
+  const byId = new Map(currentRun.stepStates.map(s => [s.stepId, s]));
+  const toSkip = [];
+  for (const s of steps) {
+    const stepPlain = toPlain(s);
+    if (!stepPlain.dependsOn?.includes(switchStepId)) continue;
+    const branch = stepPlain.branch;
+    if (branch == null || branch === "") continue;
+    if (branch === selectedBranch) continue;
+    toSkip.push(stepPlain.id);
+  }
+  let r = currentRun;
+  for (const rootStepId of toSkip) {
+    await skipBranch(workflow, runId, r, rootStepId, 0, io);
+    r = await Run.findById(runId);
+    if (!r) break;
+  }
+}
 
 async function propagateRunFailure({ runId, failedStepId, io }) {
 
@@ -816,6 +1075,12 @@ async function propagateRunFailure({ runId, failedStepId, io }) {
     const cancelledSteps = runDoc?.stepStates?.filter(
       s => s.status === "cancelled"
     ) || [];
+    const skippedSteps = runDoc?.stepStates?.filter(
+      s => s.status === "skipped"
+    ) || [];
+
+    cancelledSteps.forEach(st => emitStepUpdate(runId, st.stepId, st.iteration ?? 0, "cancelled", io));
+    skippedSteps.forEach(st => emitStepUpdate(runId, st.stepId, st.iteration ?? 0, "skipped", io));
 
     await Promise.all(
       cancelledSteps.map(st =>
@@ -879,15 +1144,45 @@ async function cancelExecutions(run, reason = "Run cancelled") {
   );
 }
 
-function buildContext(run) {
+/**
+ * Get the effective output for a step for variable resolution.
+ * run.outputs is keyed by stepId; each value may be iteration-keyed (e.g. { "0": result }).
+ * We expose the first iteration's value so that steps.<stepId>.output resolves correctly.
+ * If that value is a plain array (e.g. from OpenAI), wrap as { output } so steps.x.output works.
+ */
+function getStepOutputForContext(outputs, stepId) {
+  let raw = outputs instanceof Map ? outputs.get(stepId) : outputs?.[stepId];
+  if (raw == null) return undefined;
+  // Unwrap iteration-keyed container (outputs are stored as outputs[stepId][iteration])
+  if (typeof raw === "object" && !Array.isArray(raw) && raw !== null) {
+    const entries = raw instanceof Map ? Array.from(raw.entries()) : Object.entries(raw);
+    const firstNumeric = entries.find(([k]) => String(Number(k)) === k);
+    raw = firstNumeric ? (raw instanceof Map ? raw.get(firstNumeric[0]) : raw[firstNumeric[0]]) : (raw instanceof Map ? raw.get("0") : raw["0"]) ?? raw;
+  }
+  if (raw == null) return undefined;
+  // So that steps.<stepId>.output works: if value is a plain array, expose as { output }
+  if (Array.isArray(raw)) return { output: raw };
+  return raw;
+}
 
-  const outputsObj =
+function buildContext(run) {
+  const outputsRaw =
     run.outputs instanceof Map
       ? Object.fromEntries(run.outputs)
       : run.outputs || {};
 
+  const stepIds = Object.keys(outputsRaw);
+  const steps = {};
+  for (const stepId of stepIds) {
+    const effective = getStepOutputForContext(
+      run.outputs instanceof Map ? run.outputs : outputsRaw,
+      stepId
+    );
+    if (effective !== undefined) steps[stepId] = effective;
+  }
+
   return {
-    steps: outputsObj,
+    steps,
     run,
     trigger: run.triggerPayload || {},
     env: process.env,
@@ -1016,24 +1311,49 @@ export async function startOrchestrator({ io }) {
 
     /* ================= INIT RUN WITH SNAPSHOT ================= */
 
-    await Run.updateOne(
-      { _id: runId },
-      {
-        $set: {
-          status: "running",
-          currentStepIndex: 0,
-          processedMessages: [],
-          outputs: {},
-          workflowSnapshot: snapshot,
-          stepStates: [],
-          loopState: {},
-          loopContext: {}
+    const isReplay = run.workflowSnapshot?.steps?.length > 0 && Array.isArray(run.stepStates) && run.stepStates.length > 0;
+
+    if (isReplay) {
+      await Run.updateOne(
+        { _id: runId },
+        {
+          $set: {
+            status: "running",
+            processedMessages: []
+          }
         }
-      }
-    );
+      );
+    } else {
+      await Run.updateOne(
+        { _id: runId },
+        {
+          $set: {
+            status: "running",
+            currentStepIndex: 0,
+            processedMessages: [],
+            outputs: {},
+            workflowSnapshot: snapshot,
+            stepStates: [],
+            loopState: {},
+            loopContext: {}
+          }
+        }
+      );
+    }
 
     const updatedRun = await Run.findById(runId);
     emitRunUpdate(updatedRun, io);
+
+    await addRunLog(
+      runId,
+      {
+        stepId: "system",
+        message: `[RUN START] runId=${runId}`,
+        createdAt: new Date(),
+        level: "system"
+      },
+      io
+    );
 
     /* ================= DISPATCH ================= */
 
@@ -1126,7 +1446,7 @@ export async function startOrchestrator({ io }) {
         
      const logEntry = {
        stepId,
-       message: "Step completed",
+       message: `[STEP COMPLETE] ${stepId} iteration=${iteration ?? 0}`,
        createdAt: new Date(),
        level: "info"
      };
@@ -1175,10 +1495,22 @@ export async function startOrchestrator({ io }) {
        return channel.ack(msg);
      }
    
+     emitStepUpdate(runId, stepId, iteration, "completed", io);
      emitRunLog(runId, logEntry, io);
    
      const updatedRun = await Run.findById(runId);
      emitRunUpdate(updatedRun, io);
+
+     const stepPlain = toPlain(step);
+     if (stepPlain?.errorFrom) {
+       await Run.updateOne({ _id: runId }, { $unset: { lastError: 1 } });
+     }
+     if (stepPlain?.type === "switch") {
+       const selectedBranch = output?.output?.branch ?? output?.branch;
+       if (selectedBranch != null) {
+         await skipNonMatchingSwitchBranches(updatedRun.workflowSnapshot, runId, updatedRun, stepId, selectedBranch, io);
+       }
+     }
    
      await releaseGlobalSlot(globalToken);
    
@@ -1232,7 +1564,7 @@ export async function startOrchestrator({ io }) {
          runId,
          {
            stepId: "system",
-           message: "Run completed successfully",
+           message: "[RUN COMPLETE] Run completed successfully",
            createdAt: new Date(),
            level: "info"
          },
@@ -1262,7 +1594,7 @@ export async function startOrchestrator({ io }) {
           runId,
           {
             stepId,
-            message: `Step failed: ${error}`,
+            message: `[STEP FAIL] ${stepId}: ${error}`,
             createdAt: new Date(),
             level: "error"
           },
@@ -1297,16 +1629,19 @@ export async function startOrchestrator({ io }) {
         return channel.ack(msg);
       }
 
+      emitStepUpdate(runId, stepId, iteration, "retrying", io);
       const updatedRun = await Run.findById(runId);
       emitRunUpdate(updatedRun, io);
 
-      const delayMs = 2000 * Math.pow(2, nextRetry - 1);
+      const delayMs = typeof step.retryDelay === "number" && step.retryDelay >= 0
+        ? step.retryDelay
+        : 2000 * Math.pow(2, nextRetry - 1);
 
       await addRunLog(
         runId,
         {
           stepId,
-          message: `Retry scheduled in ${delayMs}ms (attempt ${nextRetry}/${maxRetry})`,
+          message: `[STEP RETRY] Retry scheduled in ${delayMs}ms (attempt ${nextRetry}/${maxRetry})`,
           createdAt: new Date(),
           level: "retry"
         },
@@ -1356,27 +1691,21 @@ export async function startOrchestrator({ io }) {
     const stepFailLog = !isTimeout
       ? {
           stepId,
-          message: `Step failed: ${error}`,
+          message: `[STEP FAIL] ${stepId}: ${error}`,
           createdAt: new Date(),
           level: "error"
         }
       : null;
 
-    // DB update: stepFailLog null ise logs push yapma!
-    const update = {
+    // DB update: set step to failed first (run status may stay running if error port is used)
+    const stepUpdate = {
       $set: {
-        status: "failed",
-        finishedAt,
-        durationMs: finishedAt.getTime() - run.createdAt.getTime(),
         "stepStates.$.status": "failed",
         "stepStates.$.finishedAt": finishedAt,
         "stepStates.$.durationMs": durationMs
       }
     };
-
-    if (stepFailLog) {
-      update.$push = { logs: stepFailLog };
-    }
+    if (stepFailLog) stepUpdate.$push = { logs: stepFailLog };
 
     const res = await Run.updateOne(
       {
@@ -1391,7 +1720,7 @@ export async function startOrchestrator({ io }) {
           }
         }
       },
-      update
+      stepUpdate
     );
 
     if (res.modifiedCount === 0) {
@@ -1399,12 +1728,49 @@ export async function startOrchestrator({ io }) {
       return channel.ack(msg);
     }
 
-    await dequeueReadyRun(runId);
+    emitStepUpdate(runId, stepId, iteration, "failed", io);
+    if (stepFailLog) emitRunLog(runId, stepFailLog, io);
 
-    // realtime step fail log (tek kez!)
-    if (stepFailLog) {
-      emitRunLog(runId, stepFailLog, io);
+    const wfSnapshot = run.workflowSnapshot;
+    const errorHandlerSteps = wfSnapshot?.steps?.filter(s => s.errorFrom === stepId) ?? [];
+
+    if (errorHandlerSteps.length > 0) {
+      const lastError = { stepId, message: error, iteration: iteration ?? 0 };
+      const errStepIds = errorHandlerSteps.map(s => s.id);
+      await Run.updateOne({ _id: runId }, { $set: { lastError } });
+
+      const runDoc = await Run.findById(runId);
+      const existingIds = new Set((runDoc?.stepStates ?? []).filter(st => st.stepId && (st.iteration ?? 0) === 0).map(st => st.stepId));
+      const toAdd = errStepIds.filter(id => !existingIds.has(id)).map(id => ({
+        stepId: id,
+        iteration: 0,
+        status: "pending",
+        retryCount: 0
+      }));
+      if (toAdd.length > 0) {
+        await Run.updateOne({ _id: runId }, { $push: { stepStates: { $each: toAdd } } });
+      } else {
+        await Run.updateOne(
+          { _id: runId },
+          { $set: { "stepStates.$[s].status": "pending" } },
+          { arrayFilters: [{ "s.stepId": { $in: errStepIds }, "s.iteration": 0 }] }
+        );
+      }
+      await enqueueReadyRun(runId);
+      await dispatchReadySteps({ runId, channel, resolveVariables, io });
+      await releaseGlobalSlot(globalToken);
+      return channel.ack(msg);
     }
+
+    await dequeueReadyRun(runId);
+    const failRunUpdate = {
+      $set: {
+        status: "failed",
+        finishedAt,
+        durationMs: finishedAt.getTime() - run.createdAt.getTime()
+      }
+    };
+    await Run.updateOne({ _id: runId }, failRunUpdate);
 
     await addRunLog(
       runId,
@@ -1537,6 +1903,11 @@ export async function startOrchestrator({ io }) {
     emitRunUpdate(finalRun, io);
     emitRunLog(runId, systemLog, io);
 
+    for (const s of finalRun.stepStates) {
+      if (s.status === "cancelled" || s.status === "skipped") {
+        emitStepUpdate(runId, s.stepId, s.iteration ?? 0, s.status, io);
+      }
+    }
     for (const log of stepLogs) {
       emitRunLog(runId, log, io);
     }
@@ -1593,10 +1964,11 @@ export async function startOrchestrator({ io }) {
       return channel.ack(msg);
     }
 
+    emitStepUpdate(runId, stepPlain.id, iteration, "running", io);
     const updatedRun = await Run.findById(runId);
     emitRunUpdate(updatedRun, io);
 
-    const previousOutput = buildPrevOutput(updatedRun, stepPlain.dependsOn, iteration);
+    const previousOutput = getPreviousOutput(updatedRun, stepPlain, iteration);
     const resolvedParams = resolveVariables(stepPlain.params ?? {}, buildContext(updatedRun));
 
     await addRunLog(
@@ -1657,7 +2029,6 @@ export async function startOrchestrator({ io }) {
     try {
     const { runId, stepIndex, executionId, globalToken, iteration = 0, loopStepId = null} =
     JSON.parse(msg.content.toString());
-    //console.log("TIMEOUT FIRE:", { runId, stepIndex, executionId });
     
     const run = await Run.findById(runId);
     if (!run) {
@@ -1743,23 +2114,36 @@ export async function startOrchestrator({ io }) {
         await releaseGlobalSlot(globalToken);
         return channel.ack(msg);
       }
+      emitStepUpdate(runId, step.id, iteration, "retrying", io);
       await addRunLog(
         runId,
         {
           stepId: step.id,
-          message: "Step failed: Timeout exceeded",
+          message: "[STEP TIMEOUT] Timeout exceeded",
           level: "error",
           createdAt: new Date()
         },
         io
       );
-      const delayMs = 2000 * Math.pow(2, nextRetry - 1);
+      await addRunLog(
+        runId,
+        {
+          stepId: step.id,
+          message: "[STEP FAIL] Timeout exceeded",
+          level: "error",
+          createdAt: new Date()
+        },
+        io
+      );
+      const delayMs = typeof step.retryDelay === "number" && step.retryDelay >= 0
+        ? step.retryDelay
+        : 2000 * Math.pow(2, nextRetry - 1);
     
       await addRunLog(
         runId,
         {
           stepId: step.id,
-          message: `Retry scheduled in ${delayMs}ms (attempt ${nextRetry}/${maxRetry})`,
+          message: `[STEP RETRY] Retry scheduled in ${delayMs}ms (attempt ${nextRetry}/${maxRetry})`,
           level: "retry",
           createdAt: new Date()
         },
@@ -1811,11 +2195,22 @@ export async function startOrchestrator({ io }) {
         }
     });
 
+    emitStepUpdate(runId, step.id, iteration, "failed", io);
     await addRunLog(
       runId,
       {
         stepId: step.id,
-        message: "Step failed: Timeout exceeded",
+        message: "[STEP TIMEOUT] Timeout exceeded (no retries left)",
+        level: "error",
+        createdAt: new Date()
+      },
+      io
+    );
+    await addRunLog(
+      runId,
+      {
+        stepId: step.id,
+        message: "[STEP FAIL] Timeout exceeded",
         level: "error",
         createdAt: new Date()
       },

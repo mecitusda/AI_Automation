@@ -31,32 +31,6 @@ type RunUpdatePayload = {
   stepStates?: StepState[];
 };
 
-type SystemMetrics = {
-  ok: boolean;
-  ts: number;
-  globalMaxInflight: number;
-  inflight: number;
-  tokens: number;
-  slotMismatch: boolean;
-};
-
-type SummaryMetrics = {
-  ok: boolean;
-  ts: number;
-  windowSec: number;
-  runsByStatus: Record<string, number>;
-  runDurations: Record<string, { avgDurationMs: number | null; maxDurationMs: number | null }>;
-  stepsByStatus: Record<
-    string,
-    { count: number; avgDurationMs: number | null; totalRetry: number; maxRetry: number }
-  >;
-  logs: {
-    errorCount: number;
-    retryLogCount: number;
-    timeoutHintCount: number;
-  };
-};
-
 export default function RunsPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
@@ -165,7 +139,7 @@ export default function RunsPage() {
 
           return (
             <Link key={run._id} to={`/runs/${run._id}`} className="cardLink">
-              <div className="card">
+              <div className="card card--run">
                 <div className="row">
                   <div>
                     <div className="id">#{run._id}</div>

@@ -43,10 +43,30 @@
 }
 
 .meta{
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
   font-size: 1.6rem;
   color: var(--muted);
 }
 
+.meta a{
+  color: var(--muted);
+  text-decoration: none;
+  border: 1px solid var(--muted);
+  padding: .4rem .8rem;
+  border-radius: 4px;
+  transition: all 0.1s ease;
+  margin-left: 1rem;
+  font-size: 1.4rem;
+  font-weight: 500;
+  color: var(--text);
+  &:hover{
+    color: var(--text);
+  }
+
+}
 .text-orange{
   color: var(--yellow);
 }
@@ -82,21 +102,15 @@
   gap: 20px;
 }
 
-.card{
+/* Runs list card variant (base .card is in global.css) */
+.card--run{
   background: linear-gradient(145deg, var(--panel), var(--panel-2));
-  border: 1px solid var(--border);
   border-radius: 18px;
-  padding: 22px;
-  transition: all .25s ease;
   position: relative;
   overflow: hidden;
-  z-index: 1
+  z-index: 1;
 }
-.card-title{
-  font-size: 2rem;
-}
-
-.card::before{
+.card--run::before{
   content:"";
   position:absolute;
   inset:0;
@@ -105,17 +119,18 @@
   transition: opacity .3s ease;
   z-index: -1;
 }
-
-.card:hover{
-  border-color: rgba(59,130,246,.4);
+.card--run:hover{
   box-shadow:
     0 12px 40px rgba(0,0,0,.5),
     0 0 0 1px rgba(59,130,246,.1);
   transform: translateY(-2px);
 }
-
-.card:hover::before{
+.card--run:hover::before{
   opacity:1;
+}
+
+.card-title{
+  font-size: 2rem;
 }
 
 /* ========== ROW ========== */

@@ -37,10 +37,10 @@ export const getNodeColors = (status: string) => {
       };
     case "skipped":
       return {
-        border: "#9ca3af",
-        background: "#374151",
+        border: "#eab308",
+        background: "#422006",
         glow: "none",
-        dot: "#d1d5db",
+        dot: "#facc15",
       };
     case "cancelled":
       return {

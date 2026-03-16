@@ -1,0 +1,15 @@
+{
+  "name": "Test Timeout",
+  "trigger": { "type": "manual" },
+  "steps": [
+    {
+      "id": "delayStep",
+      "type": "delay",
+      "params": { "ms": 15000 },
+      "dependsOn": [],
+      "timeout": 3000,
+      "retry": 0
+    }
+  ],
+  "maxParallel": 5
+}

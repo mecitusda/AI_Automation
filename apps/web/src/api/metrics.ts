@@ -17,3 +17,20 @@ export function fetchSummary(windowSec = 3600) {
     `/metrics/summary?windowSec=${windowSec}`
   );
 }
+
+export type DashboardMetrics = {
+  ok: boolean;
+  ts: number;
+  windowSec: number;
+  avgRunDurationMs: number | null;
+  stepFailureRate: number | null;
+  activeRuns: number;
+  runsPerWorkflow: { workflowId: string; count: number }[];
+  stepExecutionCount: number;
+};
+
+export function fetchDashboard(windowSec = 3600) {
+  return apiFetch<DashboardMetrics>(
+    `/metrics/dashboard?windowSec=${windowSec}`
+  );
+}

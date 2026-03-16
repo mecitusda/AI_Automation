@@ -19,7 +19,8 @@ export async function startScheduler() {
 }
 
 export function registerCronWorkflow(workflow) {
-  if (!workflow.trigger?.cron) return;
+  const cronExpression = workflow.trigger?.cron || workflow.trigger?.schedule;
+  if (!cronExpression) return;
 
   const id = workflow._id.toString();
 
@@ -29,7 +30,7 @@ export function registerCronWorkflow(workflow) {
     activeJobs.delete(id);
   }
 
-  const job = cron.schedule(workflow.trigger.cron, async () => {
+  const job = cron.schedule(cronExpression, async () => {
     console.log(`Cron fired for workflow: ${workflow.name}`);
 
     const existingRunning = await Run.findOne({
