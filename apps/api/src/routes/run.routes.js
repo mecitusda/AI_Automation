@@ -138,6 +138,7 @@ router.get("/:id/detail", async (req, res) => {
       timeout: s.timeout,
       dependsOn: s.dependsOn || [],
       disabled: s.disabled || false,
+      params: s.params || {},
     }));
 
     const stepStates = (run.stepStates || []).map((st) => ({
@@ -162,6 +163,10 @@ router.get("/:id/detail", async (req, res) => {
       stepId: l.stepId,
       message: l.message,
       level: l.level || "info",
+      status: l.status,
+      durationMs: l.durationMs,
+      attempt: l.attempt,
+      error: l.error,
       createdAt: l.createdAt,
     }));
 

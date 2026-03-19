@@ -25,11 +25,13 @@ type StepEditModalProps = {
   pluginCatalog?: PluginInfo[];
   /** Workflow-level validation errors for this step (e.g. from last failed Save). Shown inline with field errors. */
   stepErrorsFromWorkflow?: Record<string, string>;
+  /** Workflow-level variable warnings for this step (non-blocking). Shown in yellow. */
+  stepWarningsFromWorkflow?: Record<string, string>;
   onClose: () => void;
   onSave: (updated: EditableStep) => void;
 };
 
-export default function StepEditModal({ step, steps = [], workflowId, pluginCatalog = [], stepErrorsFromWorkflow, onClose, onSave }: StepEditModalProps) {
+export default function StepEditModal({ step, steps = [], workflowId, pluginCatalog = [], stepErrorsFromWorkflow, stepWarningsFromWorkflow, onClose, onSave }: StepEditModalProps) {
   const [params, setParams] = useState<Record<string, unknown>>({});
   const [retry, setRetry] = useState(0);
   const [timeoutMs, setTimeoutMs] = useState(0);
@@ -52,6 +54,7 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
 
   useEffect(() => {
     if (!step?.type) return;
+    if (typeof step.type !== "string") return;
     let cancelled = false;
     fetchPlugin(step.type)
       .then((info) => { if (!cancelled) setPluginMeta(info); })
@@ -117,11 +120,28 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
     () => ({ ...(stepErrorsFromWorkflow ?? {}), ...errors }),
     [stepErrorsFromWorkflow, errors]
   );
+  const effectiveWarnings = stepWarningsFromWorkflow ?? {};
 
   const handleSave = () => {
     const errs = useSchemaForm
       ? validateParamsFromSchema(pluginMeta?.schema, params)
       : validateNodeParams(step.type, params);
+
+    // Extra safety for HTTP nodes: when method != GET, body must be valid JSON.
+    // Some forms may store invalid JSON as a string; block Save in that case.
+    if (step.type === "http") {
+      const method = String(params?.method ?? "GET").toUpperCase();
+      if (method !== "GET" && typeof params?.body === "string") {
+        const t = params.body.trim();
+        if (t) {
+          try {
+            JSON.parse(t);
+          } catch {
+            (errs as Record<string, string>).body = "Body must be valid JSON";
+          }
+        }
+      }
+    }
     if (credentialRequired && (params.credentialId == null || String(params.credentialId).trim() === "")) {
       errs.credentialId = "Credential is required";
     }
@@ -156,12 +176,15 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
   const hasUpstreamSteps = steps.filter((s) => s.id !== step.id).length > 0;
 
   return (
-    <div className="modalOverlay" onClick={onClose}>
+    <div className="modalOverlay">
       <div className="modalCard modalCard--stepEdit" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="modalCloseButton" onClick={onClose} aria-label="Close">
+          ×
+        </button>
         <div className="stepEditModal__layout">
           <div className="stepEditModal__editor">
             <h2>Edit step: {step.id}</h2>
-            <div className="modalSection" style={{ marginTop: -8 }}>
+          <div className="modalSection" style={{ marginTop: -8 }}>
               <strong>Type:</strong> {step.type}
               {description && (
                 <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "#9ca3af", fontWeight: "normal" }}>
@@ -221,26 +244,44 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
                   params={params}
                   onChange={setParams}
                   errors={effectiveErrors}
+                  warnings={effectiveWarnings}
                   registerInsertHandler={(fn) => { insertHandlerRef.current = fn; }}
                   availablePaths={getFlattenedPaths(variableTree)}
                   availableVariableTree={variableTree}
                 />
               ) : (
-                <FormComponent
-                  stepId={step.id}
-                  stepType={step.type}
-                  params={params}
-                  onChange={setParams}
-                  errors={effectiveErrors}
-                  registerInsertHandler={(fn) => { insertHandlerRef.current = fn; }}
-                  availablePaths={getFlattenedPaths(variableTree)}
-                  availableVariableTree={variableTree}
-                  suggestedArrayPaths={runOutputsByStep ? getArrayPathsFromRunOutputs(runOutputsByStep) : undefined}
-                  examplePrompt={nodeType?.examplePrompt}
-                  fieldHelp={nodeType?.fieldHelp}
-                  showInsertVariableButton={false}
-                  availableTargetSteps={steps.filter((s) => s.id !== step.id).map((s) => ({ id: s.id, label: `${s.id} (${(s as { type?: string }).type ?? "step"})` }))}
-                />
+                <>
+                  <FormComponent
+                    stepId={step.id}
+                    stepType={step.type}
+                    params={params}
+                    onChange={setParams}
+                    errors={effectiveErrors}
+                    registerInsertHandler={(fn) => { insertHandlerRef.current = fn; }}
+                    availablePaths={getFlattenedPaths(variableTree)}
+                    availableVariableTree={variableTree}
+                    suggestedArrayPaths={runOutputsByStep ? getArrayPathsFromRunOutputs(runOutputsByStep) : undefined}
+                    examplePrompt={nodeType?.examplePrompt}
+                    fieldHelp={nodeType?.fieldHelp}
+                    showInsertVariableButton={false}
+                    availableTargetSteps={steps.filter((s) => s.id !== step.id).map((s) => {
+                      return {
+                        id: s.id,
+                        label: `${s.id} (${(s as { type?: string }).type ?? "step"})`,
+                      };
+                    })}
+                  />
+                  {Object.keys(effectiveWarnings).length > 0 && (
+                    <div style={{ marginTop: 12, padding: 8, background: "rgba(234,179,8,0.1)", borderRadius: 6, fontSize: 12 }}>
+                      <div style={{ color: "#eab308", fontWeight: 600, marginBottom: 4 }}>Variable warnings</div>
+                      <ul style={{ margin: 0, paddingLeft: 18, color: "#ca8a04" }}>
+                        {Object.entries(effectiveWarnings).map(([key, msg]) => (
+                          <li key={key}><strong>{key}:</strong> {msg}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

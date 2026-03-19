@@ -13,6 +13,7 @@
 
 /* Card */
 .modalCard {
+  position: relative;
   width: 500px;
   max-width: 90%;
   background: #111827;
@@ -25,6 +26,31 @@
   height: 90%;
   overflow-y: auto;
   
+}
+
+/* Top-right close button */
+.modalCloseButton {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none!important;
+  border: none!important;
+  border-radius: 50%!important;
+  color: #e5e7eb;
+  cursor: pointer;
+  font-size: 20px!important;
+  line-height: 1;
+  margin-top: 0 !important;
+  padding: 0 !important;
+}
+
+.modalCloseButton:hover {
+  opacity: 0.7!important;
 }
 
 .modalCard::-webkit-scrollbar {
@@ -70,6 +96,8 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: 24px;
+  scrollbar-width: thin;
+
 }
 
 .stepEditModal__editor h2 {

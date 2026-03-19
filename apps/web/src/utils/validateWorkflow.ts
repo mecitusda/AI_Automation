@@ -1,14 +1,14 @@
 import type { WorkflowDetail } from "../api/workflow";
 import { validateNodeParams } from "../nodes";
-import { validateVariablePath } from "./variableSystem";
+import { parseVariables, validateVariable } from "./variableSystem";
 
 export type WorkflowValidationResult = {
   valid: boolean;
   errors: string[];
   stepErrors: Record<string, Record<string, string>>;
+  warnings: string[];
+  stepWarnings: Record<string, Record<string, string>>;
 };
-
-const VARIABLE_EXPR_REGEX = /\{\{\s*([^}]+?)\s*\}\}/g;
 
 function buildGraph(steps: { id: string; dependsOn?: string[] }[]) {
   const stepIds = new Set(steps.map((s) => s.id));
@@ -61,9 +61,17 @@ function findCycle(steps: { id: string; dependsOn?: string[] }[]): string[] {
 export function validateWorkflow(steps: WorkflowDetail["steps"]): WorkflowValidationResult {
   const errors: string[] = [];
   const stepErrors: Record<string, Record<string, string>> = {};
+  const warnings: string[] = [];
+  const stepWarnings: Record<string, Record<string, string>> = {};
 
   if (!steps || steps.length === 0) {
-    return { valid: false, errors: ["Workflow must have at least one step"], stepErrors: {} };
+    return {
+      valid: false,
+      errors: ["Workflow must have at least one step"],
+      stepErrors: {},
+      warnings: [],
+      stepWarnings: {},
+    };
   }
 
   const cycle = findCycle(steps);
@@ -87,36 +95,35 @@ export function validateWorkflow(steps: WorkflowDetail["steps"]): WorkflowValida
     }
 
     const paramErrs = validateNodeParams(step.type, step.params ?? {});
-    const variableErrs: Record<string, string> = {};
 
-    // Variable-level validation: scan string fields for {{ ... }} expressions
+    const context = {
+      steps: steps.map((s) => ({ id: s.id, type: s.type })),
+      currentStepId: step.id,
+    };
+    const variableWarningsForStep: Record<string, string> = {};
+
     for (const [key, value] of Object.entries(step.params ?? {})) {
       if (typeof value !== "string") continue;
-      const str = value as string;
-      let match: RegExpExecArray | null;
-      const seenForField = new Set<string>();
-      while ((match = VARIABLE_EXPR_REGEX.exec(str)) !== null) {
-        const expr = match[1];
-        if (!expr || seenForField.has(expr)) continue;
-        seenForField.add(expr);
-        const result = validateVariablePath(expr, {
-          steps: steps.map((s) => ({ id: s.id, type: s.type })),
-          currentStepId: step.id,
-        });
-        if (!result.ok && result.error) {
-          variableErrs[key] = result.error;
-          errors.push(`${step.id}.${key}: ${result.error}`);
-          // Only record first error per field for now
+      const paths = parseVariables(value as string);
+      const seen = new Set<string>();
+      for (const path of paths) {
+        if (seen.has(path)) continue;
+        seen.add(path);
+        const result = validateVariable(path, context);
+        const message = result.warning ?? (result.valid ? undefined : "Invalid variable");
+        if (message) {
+          variableWarningsForStep[key] = message;
+          warnings.push(`${step.id}.${key}: ${message}`);
           break;
         }
       }
     }
 
-    const combinedErrs =
-      Object.keys(variableErrs).length > 0 ? { ...paramErrs, ...variableErrs } : paramErrs;
-
-    if (Object.keys(combinedErrs).length > 0) {
-      stepErrors[step.id] = combinedErrs;
+    if (Object.keys(variableWarningsForStep).length > 0) {
+      stepWarnings[step.id] = variableWarningsForStep;
+    }
+    if (Object.keys(paramErrs).length > 0) {
+      stepErrors[step.id] = paramErrs;
     }
   }
 
@@ -124,5 +131,7 @@ export function validateWorkflow(steps: WorkflowDetail["steps"]): WorkflowValida
     valid: errors.length === 0,
     errors,
     stepErrors,
+    warnings,
+    stepWarnings,
   };
 }

@@ -33,6 +33,8 @@ export default function ForeachNodeForm({ params, onChange, errors, availablePat
   }, [registerInsertHandler]);
 
   const itemVariableName = String(params?.itemVariableName ?? "item");
+  const parallel = params?.parallel === true;
+  const continueOnError = params?.continueOnError !== false;
   const maxParallel = Number(params?.maxParallel ?? 0) || undefined;
 
   // Prefer run-based array paths when available; fallback to steps/trigger paths
@@ -106,7 +108,37 @@ export default function ForeachNodeForm({ params, onChange, errors, availablePat
         <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>Use {"{{ loop.item }}"} in child steps.</div>
       </div>
       <div style={sectionStyle}>
-        <label style={labelStyle}>Max parallel (0 = sequential)</label>
+        <FieldLabel style={labelStyle}>Continue on error</FieldLabel>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#e5e7eb" }}>
+          <input
+            type="checkbox"
+            checked={continueOnError}
+            onChange={(e) => set("continueOnError", e.target.checked ? true : false)}
+            style={{ transform: "scale(1.05)" }}
+          />
+          <span>Continue to next item when a step fails (default: on)</span>
+        </label>
+        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
+          When enabled, a failed step in one iteration won&apos;t stop the loop; remaining items will still be processed.
+        </div>
+      </div>
+      <div style={sectionStyle}>
+        <FieldLabel style={labelStyle}>Parallel execution</FieldLabel>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#e5e7eb" }}>
+          <input
+            type="checkbox"
+            checked={parallel}
+            onChange={(e) => set("parallel", e.target.checked ? true : undefined)}
+            style={{ transform: "scale(1.05)" }}
+          />
+          <span>Run foreach iterations concurrently (cap: workflow max parallel)</span>
+        </label>
+        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
+          When disabled, iterations run sequentially.
+        </div>
+      </div>
+      <div style={sectionStyle}>
+        <label style={labelStyle}>Max parallel override (optional)</label>
         <input
           type="number"
           min={0}
@@ -114,6 +146,9 @@ export default function ForeachNodeForm({ params, onChange, errors, availablePat
           onChange={(e) => set("maxParallel", e.target.value ? Number(e.target.value) : undefined)}
           style={inputStyle}
         />
+        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
+          If set, the engine will still cap concurrency by <code>workflow.maxParallel</code>.
+        </div>
       </div>
     </div>
   );

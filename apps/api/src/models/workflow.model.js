@@ -32,13 +32,21 @@ const workflowSchema = new mongoose.Schema({
   trigger: {
     type: {
       type: String,
-      enum: ["manual", "cron"],
+      enum: ["manual", "cron", "trigger.webhook"],
       default: "manual"
     },
     cron: { type: String },
     schedule: { type: String },
+    timezone: { type: String },
     webhookSecret: { type: String }
   },
+
+  /**
+   * Optional workflow-level fallback error handler.
+   * When a step fails and no step-level `errorFrom` handlers exist,
+   * the orchestrator can route execution to this stepId.
+   */
+  onErrorStepId: { type: String },
 
   // 🔹 ACTIVE SNAPSHOT (legacy + convenience)
   steps: { type: [stepSchema], default: [] },

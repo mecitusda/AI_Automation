@@ -6,7 +6,7 @@ export type WorkflowSummary = {
   enabled: boolean;
   currentVersion: number;
   stepCount: number;
-  trigger: "manual" | "cron";
+  trigger: WorkflowTrigger | "manual" | "cron";
 };
 
 export type WorkflowVersionInfo = {
@@ -28,13 +28,21 @@ export type RollbackResponse = {
   currentVersion: number;
 };
 
+export type WorkflowTrigger = {
+  type: "manual" | "cron" | "trigger.webhook";
+  cron?: string;
+  schedule?: string;
+  timezone?: string;
+  webhookSecret?: string;
+};
+
 export type WorkflowDetail = {
   id: string;
   name: string;
   enabled: boolean;
   currentVersion: number;
   maxParallel: number;
-  trigger: "manual" | "cron";
+  trigger: WorkflowTrigger;
   steps: {
     id: string;
     type: string;
@@ -98,7 +106,7 @@ export type CreateWorkflowBody = {
   name: string;
   steps?: WorkflowDetail["steps"];
   maxParallel?: number;
-  trigger?: { type: "manual" | "cron"; cron?: string };
+  trigger?: WorkflowTrigger;
   enabled?: boolean;
 };
 
@@ -124,7 +132,7 @@ export async function fetchWorkflowDetail(id: string): Promise<WorkflowDetail> {
 
 export async function updateWorkflow(
   id: string,
-  body: { name?: string; steps?: WorkflowDetail["steps"]; maxParallel?: number; trigger?: { type: string; cron?: string; schedule?: string }; enabled?: boolean }
+  body: { name?: string; steps?: WorkflowDetail["steps"]; maxParallel?: number; trigger?: WorkflowTrigger; enabled?: boolean }
 ): Promise<WorkflowDetail> {
   return apiFetch(`/workflows/${id}`, {
     method: "PUT",

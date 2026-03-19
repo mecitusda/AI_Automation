@@ -16,6 +16,7 @@ export type RunDetailStep = {
   timeout?: number;
   dependsOn?: string[];
   disabled?: boolean;
+  params?: Record<string, unknown>;
 };
 
 export type RunDetailStepState = {
@@ -33,6 +34,10 @@ export type RunDetailLog = {
   stepId: string;
   message: string;
   level: string;
+  status?: string;
+  durationMs?: number;
+  attempt?: number;
+  error?: string;
   createdAt?: string;
 };
 

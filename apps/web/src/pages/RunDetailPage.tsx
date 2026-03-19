@@ -11,10 +11,11 @@ import { fetchWorkflowDetail } from "../api/workflow";
 const STATUS_LEGEND = [
   { status: "running",   color: "#3b82f6", label: "Running"   },
   { status: "completed", color: "#22c55e", label: "Completed" },
-  { status: "failed",    color: "#ef4444", label: "Failed"    },
-  { status: "retrying",  color: "#f59e0b", label: "Retrying"  },
-  { status: "pending",   color: "#6b7280", label: "Pending"   },
+  { status: "failed",    color: "#ef4444", label: "Failed"   },
+  { status: "retrying",  color: "#f59e0b", label: "Retrying" },
+  { status: "pending",   color: "#6b7280", label: "Pending"  },
   { status: "skipped",   color: "#eab308", label: "Skipped"   },
+  { status: "partial",   color: "#f59e0b", label: "Partial (some iterations skipped)" },
   { status: "cancelled", color: "#4b5563", label: "Cancelled" },
 ];
 
@@ -229,12 +230,12 @@ export default function RunDetailPage() {
       setReplayLoading(false);
     }
   };
-  if (loading) return <div className="page">Loading...</div>;
-  if (!run) return <div className="page">Run not found</div>;
+  if (loading) return <div className="pageLayout">Loading...</div>;
+  if (!run) return <div className="pageLayout">Run not found</div>;
 
   return (
-    <div className="page">
-      <div className="header">
+    <div className="pageLayout">
+      <header className="pageHeader">
         <div>
           <div className="title">Run: <span className="text-orange">{run.workflow.name}</span> #{run._id}</div>
           <div className="meta">Status: <strong className={`${run.status}`}>{run.status}</strong>  </div>
@@ -267,11 +268,12 @@ export default function RunDetailPage() {
             </button>
           </div>
         )}
-      </div>
+      </header>
 
-      <div className="section" style={{ marginBottom: 16 }}>
+      <main className="pageContent">
+      <div className="pageSection" style={{ marginBottom: 16 }}>
         <div className="sectionTitle">Steps</div>
-
+        <div className="row">
         {stepStates.map((step) => (
           <div key={`${step.stepId}-${step.iteration ?? 0}`} className="stepRow">
             <div>
@@ -291,10 +293,10 @@ export default function RunDetailPage() {
               {step.status}
             </span>
           </div>
-        ))}
+        ))}</div>
       </div>
 
-      <div className="section" style={{ marginBottom: 16 }}>
+      <div className="pageSection" style={{ marginBottom: 16 }}>
         <div className="sectionTitle">Run Timeline</div>
         <div className="timelinePanel" style={{ padding: "12px 0" }}>
           {logs
@@ -334,7 +336,7 @@ export default function RunDetailPage() {
       </div>
 
       {workflow && (
-        <div className="section" style={{ marginBottom: 20, display: "flex", gap: 16 }}>
+        <div className="pageSection" style={{ marginBottom: 20, display: "flex", gap: 16 }}>
           <div style={{ flex: 2 }}>
             <div className="sectionTitle">Execution Graph</div>
             <div className="graph-color-info">
@@ -384,7 +386,7 @@ export default function RunDetailPage() {
         </div>
       )}
 
-      <div className="section">
+      <div className="pageSection">
         <div className="sectionTitle">Logs</div>
 
         <div className="logPanel">
@@ -412,6 +414,7 @@ export default function RunDetailPage() {
           <div ref={logEndRef} />
         </div>
       </div>
+      </main>
     </div>
   );
 }

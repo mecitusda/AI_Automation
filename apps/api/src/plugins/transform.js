@@ -43,11 +43,10 @@ export default {
     if (outputShape && typeof outputShape === "object" && !Array.isArray(outputShape)) {
       const out = {};
       for (const [targetKey, sourcePath] of Object.entries(outputShape)) {
-        if (typeof sourcePath !== "string") continue;
-        const val = getAtPath(previousOutput, sourcePath);
+        const val = typeof sourcePath === "string" ? getAtPath(previousOutput, sourcePath) : sourcePath;
         out[targetKey] = val;
       }
-      return { success: true, output: out };
+      return { success: true, output: out, meta: {} };
     }
 
     if (Array.isArray(mappings)) {
@@ -59,9 +58,9 @@ export default {
         const val = getAtPath(previousOutput, source);
         setAtPath(out, target, val);
       }
-      return { success: true, output: out };
+      return { success: true, output: out, meta: {} };
     }
 
-    return { success: true, output: {} };
+    return { success: true, output: {}, meta: {} };
   },
 };

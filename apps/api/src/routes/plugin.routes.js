@@ -16,6 +16,7 @@ function toPluginMeta(plugin) {
       outputs: [{ id: "default" }],
     },
     summaryTemplate: plugin.summaryTemplate ?? null,
+    trigger: plugin.trigger === true,
   };
 }
 

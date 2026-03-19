@@ -20,21 +20,233 @@
   --gray:#6b7280;
 }
 
-/* ========== PAGE ========== */
+/* ========== PAGE LAYOUT ========== */
 
-.page{
+.pageLayout{
   min-height: 100vh;
   padding: 36px;
   box-sizing: border-box;
   background: radial-gradient(circle at 20% 20%, #111827 0%, #0b0f17 60%);
 }
 
-.header{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
+.pageHeader{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 24px;
 }
+
+.pageContent{
+  flex: 1;
+}
+
+/* Edit page: fill remaining space below nav, no page scroll */
+.pageLayout--edit{
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  padding: 2rem 3.6rem;
+  flex-direction: column;
+}
+
+.pageLayout--edit .pageHeader{
+  flex-shrink: 0;
+}
+
+.pageLayout--edit .pageContent{
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.pageLayout--edit .pageContent > *:not(.workflowEditWorkspace){
+  flex-shrink: 0;
+}
+
+.pageLayout--edit .workflowEditWorkspace{
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  gap: 1rem
+}
+
+.pageLayout--edit .workflowEditSidebar{
+  width: 248px;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-right: 1px solid var(--border-strong);
+  box-shadow: 2px 0 12px rgba(0,0,0,0.2);
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.pageLayout--edit .workflowEditSidebar::-webkit-scrollbar{
+  width: 4px;
+}
+.pageLayout--edit .workflowEditSidebar::-webkit-scrollbar-track{
+  background: transparent;
+}
+.pageLayout--edit .workflowEditSidebar::-webkit-scrollbar-thumb{
+  background: rgba(255,255,255,0.15);
+  border-radius: 3px;
+}
+.pageLayout--edit .workflowEditSidebar::-webkit-scrollbar-thumb:hover{
+  background: rgba(255,255,255,0.25);
+}
+
+.workflowEditSidebar__title{
+  margin: 0;
+  padding: 16px 16px 8px 16px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.workflowEditSidebar__search{
+  padding: 0 16px 12px 16px;
+}
+.workflowEditSidebar__input{
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-3);
+  color: var(--text);
+  font-size: 13px;
+  transition: border-color 0.15s ease;
+}
+.workflowEditSidebar__input::placeholder{
+  color: var(--muted-2);
+}
+.workflowEditSidebar__input:focus{
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+}
+.workflowEditSidebar__list{
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 16px 16px;
+}
+.workflowEditSidebar__group{
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.workflowEditSidebar__category{
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-left: 10px;
+  margin-bottom: 2px;
+  position: relative;
+}
+.workflowEditSidebar__group--ai .workflowEditSidebar__category{ color: #a78bfa; }
+.workflowEditSidebar__group--data .workflowEditSidebar__category{ color: #60a5fa; }
+.workflowEditSidebar__group--control .workflowEditSidebar__category{ color: #fbbf24; }
+.workflowEditSidebar__group--utilities .workflowEditSidebar__category{ color: #94a3b8; }
+.workflowEditSidebar__group--ai .workflowEditSidebar__category::before{
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 10px;
+  background: #a78bfa;
+  border-radius: 2px;
+}
+.workflowEditSidebar__group--data .workflowEditSidebar__category::before{
+  content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 10px; background: #60a5fa; border-radius: 2px;
+}
+.workflowEditSidebar__group--control .workflowEditSidebar__category::before{
+  content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 10px; background: #fbbf24; border-radius: 2px;
+}
+.workflowEditSidebar__group--utilities .workflowEditSidebar__category::before{
+  content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 10px; background: #94a3b8; border-radius: 2px;
+}
+.workflowEditSidebar__item{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.workflowEditSidebar__item:hover{
+  background: var(--panel-2);
+  border-color: rgba(255,255,255,0.12);
+  transform: translateX(2px);
+}
+.workflowEditSidebar__item[data-category="ai"]:hover{ border-left: 2px solid #a78bfa; padding-left: 8px; }
+.workflowEditSidebar__item[data-category="data"]:hover{ border-left: 2px solid #60a5fa; padding-left: 8px; }
+.workflowEditSidebar__item[data-category="control"]:hover{ border-left: 2px solid #fbbf24; padding-left: 8px; }
+.workflowEditSidebar__item[data-category="utilities"]:hover{ border-left: 2px solid #94a3b8; padding-left: 8px; }
+.workflowEditSidebar__icon{
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.95;
+}
+.workflowEditSidebar__label{
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workflowEditSidebar__empty{
+  font-size: 12px;
+  color: var(--muted);
+  margin: 12px 0 0 0;
+  padding: 8px 0;
+}
+
+.pageLayout--edit .workflowEditCanvas{
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pageLayout--edit .workflowEditCanvasInner{
+  height: 100%;
+  position: relative;
+}
+
+.pageSection{
+  background: linear-gradient(145deg, var(--panel), var(--panel-2));
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2.4rem 1.7rem;
+  margin-bottom: 20px;
+}
+
+/* Legacy aliases (can remove after full migration) */
+.page{ min-height: 100vh; padding: 36px; box-sizing: border-box; background: radial-gradient(circle at 20% 20%, #111827 0%, #0b0f17 60%); }
+.header{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
 
 .title{
   font-size: 24px;
@@ -136,8 +348,11 @@
 /* ========== ROW ========== */
 
 .row{
-  display:flex;
-  
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: flex-start;
 }
 
 .versionRow{
@@ -302,7 +517,7 @@
   background: linear-gradient(145deg, var(--panel), var(--panel-2));
   border: 1px solid var(--border);
   border-radius: 20px;
-  padding: 24px;
+  padding: 2.4rem 1.7rem;
   margin-bottom: 20px;
 }
 
@@ -310,18 +525,19 @@
   font-size: 17px;
   font-weight: 700;
   margin-bottom: .5rem;
+  padding: 0 2rem
 }
 
 .stepRow{
   background: var(--panel-3);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px;
+  border-radius: 6px;
+  padding: 1rem 1rem;
   display:flex;
   justify-content:space-between;
   align-items:center;
-  margin-bottom: 12px;
   transition: background .2s ease;
+  gap: 1rem;
 }
 
 .stepRow:hover{

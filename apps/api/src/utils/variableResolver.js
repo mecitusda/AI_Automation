@@ -1,6 +1,6 @@
 export function resolveVariables(obj, context) {
 
-  const { steps, run, trigger, env, loop } = context;
+  const { steps, run, trigger, env, loop, error } = context;
   
   function resolvePath(path) {
 
@@ -29,6 +29,10 @@ export function resolveVariables(obj, context) {
 
     } else if (root === "trigger") {
       source = trigger;
+
+    } else if (root === "error") {
+      // Expose last error from orchestration to variables: {{ error.message }}, {{ error.stepId }}
+      source = error ?? run?.lastError;
 
     } 
     else if (root === "env") {

@@ -39,6 +39,6 @@ export default {
     } else {
       parsed = output;
     }
-    return { success: true, output: { output, parsed } };
+    return { success: true, output: { output, parsed }, meta: {} };
   },
 };

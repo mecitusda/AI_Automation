@@ -30,8 +30,13 @@ export function registerCronWorkflow(workflow) {
     activeJobs.delete(id);
   }
 
+  const scheduleOptions = {};
+  if (workflow.trigger?.timezone) {
+    scheduleOptions.timezone = workflow.trigger.timezone;
+  }
+
   const job = cron.schedule(cronExpression, async () => {
-    console.log(`Cron fired for workflow: ${workflow.name}`);
+    console.log("[CRON] Trigger fired for workflow", workflow.name);
 
     const existingRunning = await Run.findOne({
       workflowId: workflow._id,
@@ -39,30 +44,23 @@ export function registerCronWorkflow(workflow) {
     });
 
     if (existingRunning) {
-      console.log(`Skipping workflow ${workflow.name} (already running)`);
+      console.log("[CRON] Skipping workflow", workflow.name, "(already running)");
       return;
     }
 
     const run = await Run.create({
       workflowId: workflow._id,
+      workflowVersion: workflow.currentVersion ?? 1,
       status: "queued",
-      currentStepIndex: 0,
-      stepStates: [],
-      logs: [],
-      processedMessages: [],
-      workflowVersion: workflow.currentVersion,
-      outputs: new Map(),
-      createdAt: new Date()
+      triggerPayload: { triggeredBy: "cron" }
     });
 
     await channel.publish(
       "automation.direct",
       "run.start",
-      Buffer.from(JSON.stringify({
-        runId: run._id.toString()
-      }))
+      Buffer.from(JSON.stringify({ runId: run._id.toString() }))
     );
-  });
+  }, Object.keys(scheduleOptions).length ? scheduleOptions : undefined);
 
   activeJobs.set(id, job);
 }

@@ -33,6 +33,7 @@ export default function IfNode({ id, data }: NodeProps) {
     outputs: [{ id: "true" }, { id: "false" }],
   };
   const outputs = handles.outputs?.length ? handles.outputs : [{ id: "true" }, { id: "false" }];
+  const errorOutput = handles.errorOutput === true;
 
   return (
     <div
@@ -92,10 +93,16 @@ export default function IfNode({ id, data }: NodeProps) {
       >
         {disabled && <span style={{ display: "block", fontSize: 9, opacity: 0.9, textTransform: "uppercase" }}>Disabled</span>}
         {(data as { hasError?: boolean }).hasError && <span title="This step has validation errors" style={{ color: "#ef4444", fontSize: 11, display: "block" }}>⚠</span>}
+        {(data as { hasWarning?: boolean }).hasWarning && !(data as { hasError?: boolean }).hasError && (
+          <span title="Variable warnings" style={{ color: "#eab308", fontSize: 11, display: "block" }}>⚠</span>
+        )}
         <span style={{ fontSize: 12 }}>{icon} {typeLabel}</span>
         <div style={{ fontSize: 10, opacity: 0.9, marginTop: 2 }}>{summary}</div>
-        {(data.iterations?.length ?? 0) > 0 && <span style={{ fontSize: 10, opacity: 0.9 }}> [{data.iterations.join(", ")}]</span>}
-        {data.iteration !== undefined && (data.iterations?.length ?? 0) <= 1 && <span style={{ fontSize: 10, opacity: 0.9 }}> [{data.iteration}]</span>}
+        {(data.iterations?.length ?? 0) > 0 && (
+          <span style={{ fontSize: 10, opacity: 0.9 }} title={data.iterations.join(", ")}>
+            {(data.iteration ?? 0) + 1}/{data.iterations.length}
+          </span>
+        )}
       </div>
       {outputs.map((h, i) => {
         const top = outputs.length === 1 ? "50%" : i === 0 ? "35%" : "65%";
@@ -115,6 +122,21 @@ export default function IfNode({ id, data }: NodeProps) {
           />
         );
       })}
+      {errorOutput && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="error"
+          style={{
+            background: "#ef4444",
+            border: "2px solid #b91c1c",
+            bottom: 8,
+            top: "auto",
+            left: "100%",
+            transform: "translate(-50%, 0)",
+          }}
+        />
+      )}
     </div>
   );
 }

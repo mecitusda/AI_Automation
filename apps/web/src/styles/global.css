@@ -19,6 +19,9 @@ body{
 
 .main{
   min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
   position: relative;
 }
 
@@ -71,10 +74,9 @@ body{
 .card{
   background:#121826;
   border:1px solid rgba(255,255,255,.06);
-  border-radius:16px;
+  border-radius:6px;
   padding:22px;
   transition: all .25s ease;
-  
 }
 
 .card:hover{

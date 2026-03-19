@@ -17,11 +17,14 @@ const inputStyle: React.CSSProperties = {
 };
 const errorStyle: React.CSSProperties = { color: "#f87171", fontSize: 12, marginTop: 2 };
 
+const warningStyle: React.CSSProperties = { color: "#eab308", fontSize: 12, marginTop: 2 };
+
 export type SchemaFormProps = {
   schema: PluginSchemaField[];
   params: Record<string, unknown>;
   onChange: (params: Record<string, unknown>) => void;
   errors: Record<string, string>;
+  warnings?: Record<string, string>;
   registerInsertHandler?: (handler: ((path: string) => void) | null) => void;
   availablePaths?: string[];
   availableVariableTree?: VariableTreeNode[];
@@ -33,6 +36,7 @@ export default function SchemaForm({
   params,
   onChange,
   errors,
+  warnings = {},
   registerInsertHandler,
   availablePaths = [],
   availableVariableTree = [],
@@ -109,6 +113,7 @@ export default function SchemaForm({
                 style={inputStyle}
               />
               {errors[field.key] && <div style={errorStyle}>{errors[field.key]}</div>}
+              {warnings[field.key] && <div style={warningStyle}>⚠ {warnings[field.key]}</div>}
             </div>
           );
         }
@@ -130,6 +135,7 @@ export default function SchemaForm({
                 onBlur={() => setTimeout(() => setFocusedKey(null), 0)}
               />
               {errors[field.key] && <div style={errorStyle}>{errors[field.key]}</div>}
+              {warnings[field.key] && <div style={warningStyle}>⚠ {warnings[field.key]}</div>}
             </div>
           );
         }
@@ -150,6 +156,7 @@ export default function SchemaForm({
                 style={inputStyle}
               />
               {errors[field.key] && <div style={errorStyle}>{errors[field.key]}</div>}
+              {warnings[field.key] && <div style={warningStyle}>⚠ {warnings[field.key]}</div>}
             </div>
           );
         }
@@ -167,6 +174,7 @@ export default function SchemaForm({
                 <span style={labelStyle}>{field.label}</span>
               </label>
               {errors[field.key] && <div style={errorStyle}>{errors[field.key]}</div>}
+              {warnings[field.key] && <div style={warningStyle}>⚠ {warnings[field.key]}</div>}
             </div>
           );
         }
@@ -192,6 +200,7 @@ export default function SchemaForm({
                 ))}
               </select>
               {errors[field.key] && <div style={errorStyle}>{errors[field.key]}</div>}
+              {warnings[field.key] && <div style={warningStyle}>⚠ {warnings[field.key]}</div>}
             </div>
           );
         }
@@ -222,6 +231,7 @@ export default function SchemaForm({
                 onBlur={() => setTimeout(() => setFocusedKey(null), 0)}
               />
               {errors[field.key] && <div style={errorStyle}>{errors[field.key]}</div>}
+              {warnings[field.key] && <div style={warningStyle}>⚠ {warnings[field.key]}</div>}
             </div>
           );
         }

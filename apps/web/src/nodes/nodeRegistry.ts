@@ -37,6 +37,20 @@ const registry: Record<string, NodeTypeDef> = {
     validateParams: (p) => {
       const err: Record<string, string> = {};
       if (!p?.url || String(p.url).trim() === "") err.url = "URL is required";
+      const method = String(p?.method ?? "GET").toUpperCase();
+      if (method !== "GET") {
+        const body = p?.body;
+        if (typeof body === "string") {
+          const t = body.trim();
+          if (t) {
+            try {
+              JSON.parse(t);
+            } catch {
+              err.body = "Body must be valid JSON";
+            }
+          }
+        }
+      }
       return err;
     },
     getSummary: (p) => {
@@ -54,36 +68,14 @@ const registry: Record<string, NodeTypeDef> = {
     formComponent: OpenAINodeForm,
     examplePrompt: "Summarize the following:\n\nTitle: {{ fetchPost.output.title }}\n\nBody: {{ fetchPost.output.body }}",
     fieldHelp: {
+      mode: "Summarize / Generate / Extract (JSON).",
       prompt: "Instructions sent to the AI model. Use {{ variable.path }} to reference previous step outputs.",
+      language: "Response language (Auto = model default).",
+      format: "Output format: text, JSON, bullet points, or Markdown.",
+      systemPrompt: "Optional system role to set model behavior (e.g. persona or rules).",
+      tone: "Formal, casual, or professional tone.",
       temperature: "Controls randomness (0 = deterministic, 2 = very random).",
       maxTokens: "Maximum length of the generated response.",
-      output_format: "Text, JSON, or array structure for the model output.",
-      model: "OpenAI model to use (e.g. gpt-4, gpt-4o-mini).",
-    },
-    validateParams: (p) => {
-      const err: Record<string, string> = {};
-      if (!p?.prompt || String(p.prompt).trim() === "") err.prompt = "Prompt is required";
-      return err;
-    },
-    getSummary: (p) => {
-      const model = (p?.model as string) || "gpt-4";
-      const prompt = (p?.prompt as string) || "";
-      return `Model: ${model}. ${prompt.slice(0, 30)}${prompt.length > 30 ? "…" : ""}`;
-    },
-  },
-  ai: {
-    type: "ai",
-    label: "OpenAI",
-    icon: "🤖",
-    description: "Calls OpenAI API to generate text, analyze data, or produce structured output.",
-    category: "ai",
-    formComponent: OpenAINodeForm,
-    examplePrompt: "Summarize the following:\n\nTitle: {{ fetchPost.output.title }}\n\nBody: {{ fetchPost.output.body }}",
-    fieldHelp: {
-      prompt: "Instructions sent to the AI model. Use {{ variable.path }} to reference previous step outputs.",
-      temperature: "Controls randomness (0 = deterministic, 2 = very random).",
-      maxTokens: "Maximum length of the generated response.",
-      output_format: "Text, JSON, or array structure for the model output.",
       model: "OpenAI model to use (e.g. gpt-4, gpt-4o-mini).",
     },
     validateParams: (p) => {
@@ -191,7 +183,13 @@ const registry: Record<string, NodeTypeDef> = {
     examplePrompt: "Summarize the following:\n\n{{ previousStep.output }}",
     fieldHelp: {
       text: "Text to summarize. Leave empty to use the previous step output.",
-      maxLength: "Maximum length of the summary.",
+      maxLength: "Maximum length of the summary in characters.",
+      language: "Output language. Auto keeps the model's default.",
+      format: "How to format the summary (text, JSON, bullets, or Markdown).",
+      systemPrompt: "Optional system instructions for the model.",
+      tone: "Tone of the summary (formal, casual, or professional).",
+      model: "OpenAI model (e.g. gpt-4o-mini).",
+      maxTokens: "Maximum tokens for the summary response.",
     },
     getSummary: (p) => (p?.text as string) ? String(p.text).slice(0, 40) : "Summarize previous output",
   },

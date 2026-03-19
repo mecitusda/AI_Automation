@@ -34,18 +34,19 @@ export default function TemplatesPage() {
     }
   };
 
-  if (loading) return <div className="spinner" />;
+  if (loading) return <div className="pageLayout"><div className="spinner" /></div>;
 
   return (
-    <div className="page">
-      <div className="header">
-        <h1>Templates</h1>
+    <div className="pageLayout">
+      <header className="pageHeader">
+        <h1 className="title">Templates</h1>
         <div className="meta">
           <Link to="/workflows">Workflows</Link>
           {" · "}
           <Link to="/">Runs</Link>
         </div>
-      </div>
+      </header>
+      <main className="pageContent">
       <p style={{ marginBottom: 16 }}>
         Start from a template and customize in the workflow builder.
       </p>
@@ -66,6 +67,7 @@ export default function TemplatesPage() {
           </div>
         ))}
       </div>
+      </main>
     </div>
   );
 }

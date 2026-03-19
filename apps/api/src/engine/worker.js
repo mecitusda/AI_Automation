@@ -3,8 +3,13 @@ import { getPlugin } from "../plugins/registry.js";
 import { Credential } from "../models/credential.model.js";
 import { decrypt } from "../utils/credentialCrypto.js";
 import * as rateLimiter from "../utils/rateLimiter.js";
+import { normalizePluginResult } from "../utils/pluginResult.js";
 
 const controllers = new Map(); // executionId -> AbortController
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 const CREDENTIAL_CACHE_MAX = 100;
 const credentialCache = new Map(); // credentialId -> decrypted data
 
@@ -63,7 +68,7 @@ export async function startWorker() {
     if (!msg) return;
 
     try {
-      const { executionId, runId, stepIndex, iteration, step, previousOutput, globalToken, loopStepId } =
+      const { executionId, runId, stepIndex, iteration, step, previousOutput, globalToken, loopStepId, attempt } =
         JSON.parse(msg.content.toString());
 
       const plugin = getPlugin(step?.type);
@@ -154,47 +159,87 @@ export async function startWorker() {
         }
       }
 
-      try {
-        await rateLimiter.check(step.type);
-        const runExecutor = plugin.executor ?? plugin.execute;
-        const output = await runExecutor({
-          params,
-          credentials: credData ?? null,
-          previousOutput,
-          signal: ctrl.signal
-        });
+      const runExecutor = plugin.executor ?? plugin.execute;
+      const executionAttempt = typeof attempt === "number" ? attempt : 0;
 
-        await channel.publish(
+      const publishResult = (result) => {
+        const errorMessage =
+          !result.success
+            ? result.meta?.errorMessage ??
+              (typeof result.output === "string" ? result.output : undefined) ??
+              "Step failed"
+            : undefined;
+
+        const payload = {
+          executionId,
+          runId,
+          stepIndex,
+          success: result.success,
+          output: result,
+          previousOutput,
+          globalToken,
+          iteration,
+          loopStepId
+        };
+        if (errorMessage) payload.error = errorMessage;
+        return channel.publish(
           "automation.direct",
           "step.result",
-          Buffer.from(JSON.stringify({
-            executionId,
-            runId,
-            stepIndex,
-            success: true,
-            output,
-            previousOutput,
-            globalToken,
-            iteration,
-            loopStepId
-          }))
+          Buffer.from(JSON.stringify(payload))
         );
-      } catch (err) {
-        await channel.publish(
-          "automation.direct",
-          "step.result",
-          Buffer.from(JSON.stringify({
-            executionId,
-            runId,
-            stepIndex,
+      };
+
+      try {
+        const startAt = Date.now();
+        await rateLimiter.check(step.type);
+        try {
+          const raw = await runExecutor({
+            params,
+            credentials: credData ?? null,
+            previousOutput,
+            signal: ctrl.signal
+          });
+
+          const durationMs = Date.now() - startAt;
+          const result = normalizePluginResult(raw);
+          if (!result.meta || typeof result.meta !== "object") result.meta = {};
+
+          result.meta.durationMs = result.meta.durationMs ?? durationMs;
+          result.meta.attempt = result.meta.attempt ?? executionAttempt;
+
+          await publishResult(result);
+        } catch (err) {
+          const durationMs = Date.now() - startAt;
+          const errMsg = err?.message || String(err);
+          const isTimeout = typeof errMsg === "string" && errMsg.toLowerCase().includes("timeout");
+
+          const resultErr = {
             success: false,
-            error: err?.message || String(err),
-            previousOutput,
-            globalToken,
-            iteration,
-            loopStepId
-          }))
-        );
+            output: null,
+            meta: {
+              durationMs,
+              status: isTimeout ? "timeout" : "error",
+              errorMessage: errMsg
+            }
+          };
+          resultErr.meta.attempt = executionAttempt;
+
+          await publishResult(resultErr);
+        }
+      } catch (err) {
+        const durationMs = Date.now() - startAt; // best-effort; rate limiter check failure
+        const errMsg = err?.message || String(err);
+        const resultErr = {
+          success: false,
+          output: null,
+          meta: {
+            durationMs,
+            status: "error",
+            errorMessage: errMsg
+          }
+        };
+        resultErr.meta.attempt = executionAttempt;
+        await publishResult(resultErr);
       } finally {
         controllers.delete(executionId);
       }

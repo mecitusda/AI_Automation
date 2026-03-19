@@ -16,6 +16,7 @@ export default function HttpNodeForm({ params, onChange, errors, availablePaths 
   const timeout = Number(params?.timeout ?? 0);
   const headers = (params?.headers as Record<string, string>) ?? {};
   const [focusedField, setFocusedField] = useState<"url" | "body" | null>(null);
+  const [bodyJsonError, setBodyJsonError] = useState<string | null>(null);
   const [urlSelection, setUrlSelection] = useState({ start: 0, end: 0 });
   const [bodySelection, setBodySelection] = useState({ start: 0, end: 0 });
   const urlSelectionRef = useRef(urlSelection);
@@ -37,8 +38,11 @@ export default function HttpNodeForm({ params, onChange, errors, availablePaths 
         const { start, end } = bodySelectionRef.current;
         const newBody = body.slice(0, start) + text + body.slice(end);
         try {
-          onChange({ ...params, body: newBody.trim() ? JSON.parse(newBody) : undefined });
-        } catch {
+          const parsed = newBody.trim() ? JSON.parse(newBody) : undefined;
+          setBodyJsonError(null);
+          onChange({ ...params, body: parsed });
+        } catch (e: unknown) {
+          setBodyJsonError("Invalid JSON (HTTP body)");
           onChange({ ...params, body: newBody });
         }
       }
@@ -135,7 +139,9 @@ export default function HttpNodeForm({ params, onChange, errors, availablePaths 
                 const newBody = body.slice(0, start) + inserted + body.slice(end);
                 try {
                   onChange({ ...params, body: newBody.trim() ? JSON.parse(newBody) : undefined });
+                  setBodyJsonError(null);
                 } catch {
+                  setBodyJsonError("Invalid JSON (HTTP body)");
                   onChange({ ...params, body: newBody });
                 }
               }}
@@ -148,8 +154,11 @@ export default function HttpNodeForm({ params, onChange, errors, availablePaths 
           availableVariableTree={availableVariableTree}
           onChange={(v) => {
             try {
-              set("body", v.trim() ? JSON.parse(v) : undefined);
-            } catch {
+              const parsed = v.trim() ? JSON.parse(v) : undefined;
+              setBodyJsonError(null);
+              set("body", parsed);
+            } catch (e: unknown) {
+              setBodyJsonError("Invalid JSON (HTTP body)");
               set("body", v);
             }
           }}
@@ -159,6 +168,8 @@ export default function HttpNodeForm({ params, onChange, errors, availablePaths 
           onBlur={() => setTimeout(() => setFocusedField(null), 0)}
           onSelectionChange={(start, end) => setBodySelection({ start, end })}
         />
+        {bodyJsonError && <div style={errorStyle}>{bodyJsonError}</div>}
+        {errors?.body && <div style={errorStyle}>{errors.body}</div>}
       </div>
       <div style={sectionStyle}>
         <label style={labelStyle}>Timeout (ms)</label>

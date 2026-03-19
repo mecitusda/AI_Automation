@@ -42,6 +42,13 @@ export const getNodeColors = (status: string) => {
         glow: "none",
         dot: "#facc15",
       };
+    case "partial":
+      return {
+        border: "#f59e0b",
+        background: "#451a03",
+        glow: "0 0 8px #f59e0b66",
+        dot: "#fbbf24",
+      };
     case "cancelled":
       return {
         border: "#374151",

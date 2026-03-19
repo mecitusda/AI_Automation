@@ -111,6 +111,10 @@ const runSchema = new mongoose.Schema({
         enum: ["info", "warning", "error", "retry", "system"],
         default: "info"
       },
+      status: { type: String },
+      durationMs: { type: Number },
+      attempt: { type: Number },
+      error: { type: String },
       createdAt: { type: Date, default: Date.now }
     }
   ],

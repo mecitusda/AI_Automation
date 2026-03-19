@@ -21,6 +21,7 @@ export default {
     return {
       success: true,
       output: { [name]: value },
+      meta: {},
     };
   },
   validate: (params) => {

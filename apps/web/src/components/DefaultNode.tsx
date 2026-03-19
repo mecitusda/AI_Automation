@@ -161,6 +161,9 @@ export default function DefaultNode({ id, data }: NodeProps) {
           {(data as { hasError?: boolean }).hasError && (
             <span title="This step has validation errors" style={{ color: "#ef4444", fontSize: 12 }}>⚠</span>
           )}
+          {(data as { hasWarning?: boolean }).hasWarning && !(data as { hasError?: boolean }).hasError && (
+            <span title="Variable warnings" style={{ color: "#eab308", fontSize: 12 }}>⚠</span>
+          )}
           <span style={{ fontSize: 14 }}>{icon}</span>
           <span>{displayLabel}</span>
         </div>
@@ -168,13 +171,8 @@ export default function DefaultNode({ id, data }: NodeProps) {
           {summary}
         </div>
         {(data.iterations?.length ?? 0) > 0 && (
-          <span style={{ position: "absolute", top: 4, right: 8, fontSize: 10, opacity: 0.9 }}>
-            [{data.iterations.join(", ")}]
-          </span>
-        )}
-        {data.iteration !== undefined && (data.iterations?.length ?? 0) <= 1 && (
-          <span style={{ position: "absolute", top: 4, right: 8, fontSize: 10, opacity: 0.9 }}>
-            [{data.iteration}]
+          <span style={{ position: "absolute", top: 4, right: 8, fontSize: 10, opacity: 0.9 }} title={data.iterations.join(", ")}>
+            {(data.iteration ?? 0) + 1}/{data.iterations.length}
           </span>
         )}
       </div>

@@ -23,7 +23,7 @@ for (const file of files) {
   plugins[plugin.type] = plugin;
 }
 
-// Alias for backward compatibility
+// Backward compatibility: workflows with step type "ai" run the openai plugin
 if (plugins.openai) plugins.ai = plugins.openai;
 
 console.log("Loaded plugins:", Object.keys(plugins));

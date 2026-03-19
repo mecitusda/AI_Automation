@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { RunDetail, RunDetailStepState } from "../api/run";
+import type { RunDetail, RunDetailStep, RunDetailStepState } from "../api/run";
 
 type RunDebuggerPanelProps = {
   detail: RunDetail;
@@ -120,7 +120,8 @@ export default function RunDebuggerPanel({ detail, onReplayFromStep }: RunDebugg
                     }}
                   >
                     <span style={{ marginRight: 4 }}>{statusBadge(status)}</span>
-                    {s.id} <span style={{ color: "#9ca3af" }}>({s.type})</span>
+                    {s.id}{" "}
+                    <span style={{ color: "#9ca3af" }}>({s.type})</span>
                   </button>
                 </li>
               );
@@ -132,7 +133,14 @@ export default function RunDebuggerPanel({ detail, onReplayFromStep }: RunDebugg
           {selectedInstance ? (
             <>
               <div style={{ marginBottom: 4, fontSize: 13, fontWeight: 500 }}>
-                {selectedInstance.stepId} ({selectedInstance.type}) {statusBadge(selectedInstance.status)}
+                {(() => {
+                  const stepMeta = detail.steps.find((s) => s.id === selectedInstance.stepId) as RunDetailStep | undefined;
+                  return (
+                    <>
+                      {stepMeta?.id ?? selectedInstance.stepId} ({selectedInstance.type}) {statusBadge(selectedInstance.status)}
+                    </>
+                  );
+                })()}
               </div>
               <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8 }}>
                 Iteration {selectedInstance.iteration} • retries {selectedInstance.retryCount ?? 0} • duration{" "}
@@ -191,12 +199,21 @@ export default function RunDebuggerPanel({ detail, onReplayFromStep }: RunDebugg
                             borderLeft: `3px solid ${l.level === "error" ? "#ef4444" : l.level === "warning" ? "#f59e0b" : "#374151"}`,
                           }}
                         >
-                          <span style={{ color: "#9ca3af" }}>{l.level}</span> {l.message}
-                          {l.createdAt && (
-                            <span style={{ color: "#6b7280", fontSize: 10, marginLeft: 6 }}>
-                              {new Date(l.createdAt).toLocaleString()}
-                            </span>
-                          )}
+                          <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                            <span style={{ color: "#9ca3af" }}>{l.level}</span>
+                            <span>{l.message}</span>
+                            {l.createdAt ? (
+                              <span style={{ color: "#6b7280", fontSize: 10 }}>
+                                {new Date(l.createdAt).toLocaleString()}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div style={{ color: "#6b7280", fontSize: 10, marginTop: 4 }}>
+                            {l.status ? <span style={{ marginRight: 10 }}>{`status=${String(l.status)}`}</span> : null}
+                            {l.attempt != null ? <span style={{ marginRight: 10 }}>{`attempt=${String(l.attempt)}`}</span> : null}
+                            {l.durationMs != null ? <span style={{ marginRight: 10 }}>{`duration=${String(l.durationMs)}ms`}</span> : null}
+                            {l.error ? <span>{`error=${String(l.error)}`}</span> : null}
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -205,25 +222,58 @@ export default function RunDebuggerPanel({ detail, onReplayFromStep }: RunDebugg
               </div>
 
               <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 2 }}>Output</div>
                 {selectedInstance.output === undefined ? (
                   <div style={{ fontSize: 12, color: "#9ca3af" }}>No output recorded.</div>
-                ) : (
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 8,
-                      borderRadius: 6,
-                      background: "#020617",
-                      border: "1px solid #1f2937",
-                      fontSize: 11,
-                      maxHeight: 220,
-                      overflow: "auto",
-                    }}
-                  >
-                    {JSON.stringify(selectedInstance.output, null, 2)}
-                  </pre>
-                )}
+                ) : (() => {
+                  const raw = selectedInstance.output as Record<string, unknown> | undefined;
+                  const isCanonical = raw && "success" in raw && "output" in raw;
+                  const displayOutput = isCanonical ? raw.output : raw;
+                  const meta =
+                    isCanonical && raw?.meta && typeof raw.meta === "object"
+                      ? (raw.meta as Record<string, unknown>)
+                      : undefined;
+                  const hasMeta = !!meta && Object.keys(meta).length > 0;
+                  return (
+                    <>
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 2 }}>Meta</div>
+                        {hasMeta ? (
+                          <pre
+                            style={{
+                              margin: 0,
+                              padding: 8,
+                              borderRadius: 6,
+                              background: "#020617",
+                              border: "1px solid #1f2937",
+                              fontSize: 11,
+                              maxHeight: 140,
+                              overflow: "auto",
+                            }}
+                          >
+                            {JSON.stringify(meta, null, 2)}
+                          </pre>
+                        ) : (
+                          <div style={{ fontSize: 12, color: "#9ca3af" }}>No meta recorded.</div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 2 }}>Output</div>
+                      <pre
+                        style={{
+                          margin: 0,
+                          padding: 8,
+                          borderRadius: 6,
+                          background: "#020617",
+                          border: "1px solid #1f2937",
+                          fontSize: 11,
+                          maxHeight: 220,
+                          overflow: "auto",
+                        }}
+                      >
+                        {JSON.stringify(displayOutput, null, 2)}
+                      </pre>
+                    </>
+                  );
+                })()}
               </div>
             </>
           ) : (
@@ -240,6 +290,7 @@ function statusBadge(status: string) {
     running: { label: "●", color: "#f59e0b" },
     completed: { label: "✔", color: "#22c55e" },
     failed: { label: "✖", color: "#ef4444" },
+    retrying: { label: "↻", color: "#f59e0b" },
     skipped: { label: "⤼", color: "#9ca3af" },
     pending: { label: "●", color: "#6b7280" },
     cancelled: { label: "✖", color: "#9ca3af" },

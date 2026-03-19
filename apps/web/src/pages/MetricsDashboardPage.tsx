@@ -37,8 +37,8 @@ export default function MetricsDashboardPage() {
     return () => { cancelled = true; };
   }, [windowSec]);
 
-  if (loading && !data) return <div className="page"><div className="spinner" /></div>;
-  if (!data) return <div className="page">Failed to load metrics</div>;
+  if (loading && !data) return <div className="pageLayout"><div className="spinner" /></div>;
+  if (!data) return <div className="pageLayout">Failed to load metrics</div>;
 
   const runsPerWorkflowData = (data.runsPerWorkflow || []).map((w) => ({
     name: w.workflowId.slice(-6),
@@ -48,9 +48,9 @@ export default function MetricsDashboardPage() {
   const colors = ["#3b82f6", "#22c55e", "#eab308", "#ef4444", "#a855f7"];
 
   return (
-    <div className="page">
-      <div className="header">
-        <h1>Metrics Dashboard</h1>
+    <div className="pageLayout">
+      <header className="pageHeader">
+        <h1 className="title">Metrics Dashboard</h1>
         <div className="meta">
           Window:{" "}
           <select
@@ -64,7 +64,8 @@ export default function MetricsDashboardPage() {
             ))}
           </select>
         </div>
-      </div>
+      </header>
+      <main className="pageContent">
       <div className="cards" style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
         <div className="card" style={{ minWidth: 160 }}>
           <h3>Avg run duration</h3>
@@ -117,6 +118,7 @@ export default function MetricsDashboardPage() {
           </div>
         </div>
       )}
+      </main>
     </div>
   );
 }

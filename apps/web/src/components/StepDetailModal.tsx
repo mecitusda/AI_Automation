@@ -9,8 +9,11 @@ export default function StepDetailModal({ step, onClose }: StepDetailModalProps)
   if (!step) return null;
 
   return (
-    <div className="modalOverlay" onClick={onClose}>
+    <div className="modalOverlay">
       <div className="modalCard" onClick={e => e.stopPropagation()}>
+        <button type="button" className="modalCloseButton" onClick={onClose} aria-label="Close">
+          ×
+        </button>
         <h2>{step.id}</h2>
 
         <div className="modalSection">

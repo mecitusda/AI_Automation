@@ -18,7 +18,7 @@ import dagre from "dagre";
 import "reactflow/dist/style.css";
 import { fetchWorkflowDetail, updateWorkflow } from "../api/workflow";
 import { fetchRuns } from "../api/run";
-import type { WorkflowDetail } from "../api/workflow";
+import type { WorkflowDetail, WorkflowTrigger } from "../api/workflow";
 import { validateWorkflow } from "../utils/validateWorkflow";
 import { fetchPlugins } from "../api/plugins";
 import type { PluginInfo, PluginHandles } from "../api/plugins";
@@ -175,7 +175,6 @@ function stepsToNodesAndEdges(steps: WorkflowDetail["steps"]): { nodes: Node[]; 
     }
   });
   dagre.layout(dagreGraph);
-
   const nodes: Node[] = steps.map((step) => {
     const pos = dagreGraph.node(step.id);
     return {
@@ -262,14 +261,20 @@ const FALLBACK_STEP_TYPES = ["http", "log", "ai", "delay", "foreach", "if"];
 const DEFAULT_HANDLES: PluginHandles = {
   inputs: [{ id: "default" }],
   outputs: [{ id: "default" }],
+  errorOutput: true,
 };
 
 function getHandlesForStepType(pluginCatalog: PluginInfo[], stepType: string): PluginHandles {
   if (stepType === "if") {
-    return { inputs: [{ id: "default" }], outputs: [{ id: "true" }, { id: "false" }] };
+    return {
+      inputs: [{ id: "default" }],
+      outputs: [{ id: "true" }, { id: "false" }],
+      errorOutput: true,
+    };
   }
   const plugin = pluginCatalog.find((p) => p.type === stepType);
-  return plugin?.handles ?? DEFAULT_HANDLES;
+  const handles = plugin?.handles ?? DEFAULT_HANDLES;
+  return { ...handles, errorOutput: true };
 }
 
 function getAddStepOptions(pluginCatalog: PluginInfo[]): Record<"ai" | "data" | "control" | "utilities", NodeTypeDef[]> {
@@ -287,6 +292,7 @@ function getAddStepOptions(pluginCatalog: PluginInfo[]): Record<"ai" | "data" | 
   for (const pluginType of pluginTypes) {
     if (!known.has(pluginType)) {
       const plugin = pluginCatalog.find((p) => p.type === pluginType);
+      if (plugin?.trigger) continue;
       const category = (plugin?.category ?? "utilities") as keyof typeof result;
       const list = result[category] ?? result.utilities;
       list.push({
@@ -336,7 +342,7 @@ export default function WorkflowEditPage() {
     setNodes(n);
     setEdges(e);
     lastSavedStepsRef.current = JSON.stringify(workflow.steps);
-  }, [workflow]);
+  }, [workflow?.steps]);
 
   useEffect(() => {
     if (!id) return;
@@ -630,7 +636,7 @@ export default function WorkflowEditPage() {
             ...n,
             data: {
               ...n.data,
-              label: `${n.id} (${updated.type})`,
+              label: `${updated.id} (${updated.type})`,
               stepType: updated.type,
               params: updated.params ?? {},
               retry: updated.retry ?? 0,
@@ -731,6 +737,20 @@ export default function WorkflowEditPage() {
   const [lastStepErrors, setLastStepErrors] = useState<Record<string, Record<string, string>> | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
+  const validationResult = useMemo(() => validateWorkflow(buildSteps()), [nodes, edges]);
+  const stepWarnings = validationResult.stepWarnings;
+  const nodesWithWarnings = useMemo(
+    () =>
+      nodes.map((n) => ({
+        ...n,
+        data: {
+          ...n.data,
+          hasWarning: Object.keys(stepWarnings[n.id] ?? {}).length > 0,
+        },
+      })),
+    [nodes, stepWarnings]
+  );
+
   const handleSaveWorkflow = useCallback(async () => {
     if (!id || !workflow) return;
     const steps = buildSteps();
@@ -745,10 +765,10 @@ export default function WorkflowEditPage() {
     setLastStepErrors(null);
     try {
       await updateWorkflow(id, {
-        name: workflow.name,
+        name: (workflow.name ?? "").trim() || "Untitled",
         steps,
         maxParallel: workflow.maxParallel,
-        trigger: { type: workflow.trigger },
+        trigger: workflow.trigger ?? { type: "manual" },
       });
       const updated = await fetchWorkflowDetail(id);
       setWorkflow(updated);
@@ -795,12 +815,12 @@ export default function WorkflowEditPage() {
     setEdges(e);
   }, [buildSteps, setNodes, setEdges]);
 
-  if (loading) return <div className="spinner" />;
-  if (error && !workflow) return <div className="page">Error: {error}</div>;
-  if (!workflow) return <div className="page">Workflow not found</div>;
+  if (loading) return <div className="pageLayout"><div className="spinner" /></div>;
+  if (error && !workflow) return <div className="pageLayout">Error: {error}</div>;
+  if (!workflow) return <div className="pageLayout">Workflow not found</div>;
 
   return (
-    <div className="page">
+    <div className="pageLayout pageLayout--edit">
       {quickAddMenu && (
         <div
           style={{
@@ -922,12 +942,32 @@ export default function WorkflowEditPage() {
           workflowId={id}
           pluginCatalog={pluginCatalog}
           stepErrorsFromWorkflow={lastStepErrors?.[editingStep.id]}
+          stepWarningsFromWorkflow={stepWarnings[editingStep.id] ?? {}}
           onClose={() => setEditingStep(null)}
           onSave={handleSaveStep}
         />
       )}
-      <div className="header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1>Edit: {workflow.name}</h1>
+      <header className="pageHeader" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 10 }}>
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#9ca3af", marginBottom: 4 }}>Workflow name</label>
+          <input
+            type="text"
+            value={workflow.name}
+            onChange={(e) => setWorkflow({ ...workflow, name: e.target.value })}
+            placeholder="Workflow name"
+            style={{
+              width: "100%",
+              maxWidth: 320,
+              padding: "8px 10px",
+              borderRadius: 6,
+              border: "1px solid #374151",
+              background: "#0b1220",
+              color: "#e5e7eb",
+              fontSize: 16,
+              fontWeight: 600,
+            }}
+          />
+        </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button onClick={runAutoLayout}>Auto-layout</button>
           <button onClick={handleSaveWorkflow} disabled={saving}>
@@ -951,6 +991,106 @@ export default function WorkflowEditPage() {
           )}
           <button onClick={handleCancel}>Cancel</button>
         </div>
+      </header>
+      <main className="pageContent">
+      <div className="card" style={{ marginBottom: 10, display: "flex", flexDirection: "row", gap: 16, padding: 12 }}>
+        <h3 style={{ display: "flex", flexDirection: "row", gap: 16, alignItems: "center", fontSize: 16, fontWeight: 600 }}>Trigger : 
+          </h3>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-end", flexDirection: "row" }}>
+          <div style={{ display: "flex", flexDirection: "row", gap: 16, alignItems: "center" }}>
+            
+            <select
+              value={typeof workflow.trigger === "object" && workflow.trigger !== null ? workflow.trigger.type : "manual"}
+              onChange={(e) => {
+                const type = e.target.value as "manual" | "cron" | "trigger.webhook";
+                const prev: WorkflowTrigger = typeof workflow.trigger === "object" && workflow.trigger !== null ? workflow.trigger : { type: "manual" };
+                setWorkflow({ ...workflow, trigger: { ...prev, type } });
+              }}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid #374151",
+                background: "#0b1220",
+                color: "#e5e7eb",
+                fontSize: 13,
+                minWidth: 120,
+              }}
+            >
+              <option value="manual">Manual</option>
+              <option value="cron">Cron</option>
+              <option value="trigger.webhook">Webhook</option>
+            </select>
+          </div>
+          {typeof workflow.trigger === "object" && workflow.trigger !== null && workflow.trigger.type === "cron" && (
+            <>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "#9ca3af", marginBottom: 4 }}>Cron expression</label>
+                <input
+                  type="text"
+                  placeholder="0 9 * * *"
+                  value={(workflow.trigger.cron ?? workflow.trigger.schedule) ?? ""}
+                  onChange={(e) => {
+                    const prev: WorkflowTrigger = workflow.trigger as WorkflowTrigger;
+                    setWorkflow({ ...workflow, trigger: { ...prev, cron: e.target.value.trim() || undefined } });
+                  }}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "1px solid #374151",
+                    background: "#0b1220",
+                    color: "#e5e7eb",
+                    fontSize: 13,
+                    width: 140,
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "#9ca3af", marginBottom: 4 }}>Timezone (optional)</label>
+                <input
+                  type="text"
+                  placeholder="Europe/Istanbul"
+                  value={typeof workflow.trigger === "object" && workflow.trigger !== null ? (workflow.trigger.timezone ?? "") : ""}
+                  onChange={(e) => {
+                    const prev: WorkflowTrigger = workflow.trigger as WorkflowTrigger;
+                    setWorkflow({ ...workflow, trigger: { ...prev, timezone: e.target.value.trim() || undefined } });
+                  }}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "1px solid #374151",
+                    background: "#0b1220",
+                    color: "#e5e7eb",
+                    fontSize: 13,
+                    width: 160,
+                  }}
+                />
+              </div>
+            </>
+          )}
+          {typeof workflow.trigger === "object" && workflow.trigger !== null && workflow.trigger.type === "trigger.webhook" && (
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#9ca3af", marginBottom: 4 }}>Webhook secret (optional)</label>
+              <input
+                type="text"
+                placeholder="Token for X-Webhook-Secret or ?secret="
+                value={(workflow.trigger as WorkflowTrigger).webhookSecret ?? ""}
+                onChange={(e) => {
+                  const prev: WorkflowTrigger = workflow.trigger as WorkflowTrigger;
+                  setWorkflow({ ...workflow, trigger: { ...prev, webhookSecret: e.target.value.trim() || undefined } });
+                }}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #374151",
+                  background: "#0b1220",
+                  color: "#e5e7eb",
+                  fontSize: 13,
+                  width: 220,
+                }}
+              />
+            </div>
+          )}
+        </div>
       </div>
       {error && (
         <div style={{ marginBottom: 8 }}>
@@ -962,37 +1102,45 @@ export default function WorkflowEditPage() {
           </ul>
         </div>
       )}
-      <div style={{ display: "flex", gap: 16 }}>
-        <div className="card" style={{ width: 220, flexShrink: 0 }}>
-          <h3 style={{ marginTop: 0 }}>Add step</h3>
-          <input
-            type="text"
-            placeholder="Search plugins…"
-            value={paletteSearch}
-            onChange={(e) => setPaletteSearch(e.target.value)}
-            style={{
-              width: "100%",
-              marginBottom: 12,
-              padding: "6px 8px",
-              borderRadius: 6,
-              border: "1px solid #374151",
-              background: "#0b1220",
-              color: "#e5e7eb",
-              fontSize: 13,
-            }}
-          />
+      {validationResult.warnings.length > 0 && (
+        <div style={{ marginBottom: 8, padding: 8, background: "rgba(234,179,8,0.1)", border: "1px solid #eab308", borderRadius: 8 }}>
+          <div style={{ color: "#eab308", fontWeight: 600, marginBottom: 4 }}>Variable warnings (save is allowed)</div>
+          <ul style={{ color: "#ca8a04", margin: 0, paddingLeft: 20, fontSize: 13 }}>
+            {validationResult.warnings.slice(0, 5).map((msg, i) => (
+              <li key={i}>{msg}</li>
+            ))}
+            {validationResult.warnings.length > 5 && (
+              <li key="more">… and {validationResult.warnings.length - 5} more</li>
+            )}
+          </ul>
+        </div>
+      )}
+      <div className="workflowEditWorkspace">
+        <div className="card workflowEditSidebar">
+          <h3 className="workflowEditSidebar__title">Add step</h3>
+          <div className="workflowEditSidebar__search">
+            <input
+              type="text"
+              placeholder="Search plugins…"
+              value={paletteSearch}
+              onChange={(e) => setPaletteSearch(e.target.value)}
+              className="workflowEditSidebar__input"
+            />
+          </div>
+          <div className="workflowEditSidebar__list">
           {(["ai", "data", "control", "utilities"] as const).map((cat) => {
             const list = filteredAddStepOptions[cat];
             if (!list?.length) return null;
             return (
-              <div key={cat} style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af", marginBottom: 6, textTransform: "uppercase" }}>
+              <div key={cat} className={`workflowEditSidebar__group workflowEditSidebar__group--${cat}`}>
+                <div className="workflowEditSidebar__category">
                   {NODE_CATEGORIES[cat]}
                 </div>
                 {list.map((def: NodeTypeDef) => (
                   <button
                     key={def.type}
                     type="button"
+                    className="workflowEditSidebar__item"
                     draggable
                     onDragStart={(e) => {
                       e.dataTransfer.setData("application/x-workflow-step-type", def.type);
@@ -1000,35 +1148,22 @@ export default function WorkflowEditPage() {
                     }}
                     onClick={() => addNode(def.type)}
                     title={def.description || def.label}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      width: "100%",
-                      marginBottom: 4,
-                      padding: "6px 8px",
-                      textAlign: "left",
-                      background: "#1f2937",
-                      border: "1px solid #374151",
-                      borderRadius: 6,
-                      color: "#e5e7eb",
-                      cursor: "pointer",
-                      fontSize: 13,
-                    }}
+                    data-category={cat}
                   >
-                    <span style={{ fontSize: 14 }}>{def.icon}</span>
-                    <span style={{ flex: 1 }}>{def.label}</span>
+                    <span className="workflowEditSidebar__icon">{def.icon}</span>
+                    <span className="workflowEditSidebar__label">{def.label}</span>
                   </button>
                 ))}
               </div>
             );
           })}
+          </div>
           {paletteSearchLower && Object.values(filteredAddStepOptions).every((arr) => arr.length === 0) && (
-            <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>No plugins match your search.</p>
+            <p className="workflowEditSidebar__empty">No plugins match your search.</p>
           )}
         </div>
-        <div className="card" style={{ flex: 1, minHeight: 500 }}>
-          <div style={{ height: "100%", position: "relative" }}>
+        <div className="card workflowEditCanvas">
+          <div className="workflowEditCanvasInner">
             {nodes.length === 0 && (
               <div
                 style={{
@@ -1119,7 +1254,7 @@ export default function WorkflowEditPage() {
             >
               <ReactFlowProvider>
                 <EditorFlowInner
-                  nodes={nodes}
+                  nodes={nodesWithWarnings}
                   onNodesChange={onNodesChange}
                   onEdgesChange={onEdgesChange}
                   onConnect={onConnect}
@@ -1141,6 +1276,7 @@ export default function WorkflowEditPage() {
           </div>
         </div>
       </div>
+      </main>
     </div>
   );
 }

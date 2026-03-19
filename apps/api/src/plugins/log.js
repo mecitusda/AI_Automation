@@ -11,7 +11,7 @@ export default {
   },
   executor: async ({ params }) => {
     console.log("PLUGIN LOG:", params?.message);
-    return { success: true, output: { logged: true } };
+    return { success: true, output: { logged: true }, meta: {} };
   },
   summaryTemplate: "{{ message }}",
 };

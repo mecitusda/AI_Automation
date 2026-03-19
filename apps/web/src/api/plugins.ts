@@ -39,6 +39,8 @@ export type PluginInfo = {
   handles?: PluginHandles;
   /** Optional template for node preview, e.g. "{{ method }} {{ url }}". Keys are param keys. */
   summaryTemplate?: string | null;
+  /** If true, plugin is a workflow trigger (e.g. cron), not a step — do not show in Add step palette. */
+  trigger?: boolean;
 };
 
 export function fetchPlugins(): Promise<PluginInfo[]> {

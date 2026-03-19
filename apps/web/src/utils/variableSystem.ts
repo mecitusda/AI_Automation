@@ -23,7 +23,7 @@ type RunOutputsByStep = Record<string, unknown>;
  * - "loop.item"                        -> { kind: "loop", segments: ["item"] }
  * - "run.id"                           -> { kind: "run",  segments: ["id"] }
  */
-export type VariablePathKind = "trigger" | "step" | "loop" | "run";
+export type VariablePathKind = "trigger" | "step" | "loop" | "run" | "error";
 
 export type VariablePath = {
   kind: VariablePathKind;
@@ -82,6 +82,14 @@ export function parseVariablePath(expr: string): VariablePath | null {
     };
   }
 
+  // error.message / error.stepId ...
+  if (parts[0] === "error") {
+    return {
+      kind: "error",
+      segments: parts.slice(1),
+    };
+  }
+
   // steps.fetchPost.output.title
   if (parts[0] === "steps" && parts.length >= 2) {
     const stepId = parts[1];
@@ -101,6 +109,24 @@ export function parseVariablePath(expr: string): VariablePath | null {
   return null;
 }
 
+const VARIABLE_EXPR_REGEX = /\{\{\s*([^}]+?)\s*\}\}/g;
+
+/**
+ * Extract all {{ ... }} variable paths from text.
+ * @returns Array of trimmed inner path strings (e.g. ["steps.step_0.output", "loop.item.email"])
+ */
+export function parseVariables(text: string): string[] {
+  if (typeof text !== "string") return [];
+  const out: string[] = [];
+  let match: RegExpExecArray | null;
+  const re = new RegExp(VARIABLE_EXPR_REGEX.source, "g");
+  while ((match = re.exec(text)) !== null) {
+    const inner = match[1]?.trim();
+    if (inner) out.push(inner);
+  }
+  return out;
+}
+
 /**
  * Parse a full variable expression like "{{ steps.fetchPost.output.title }}" into VariablePath.
  * Accepts expressions with or without surrounding {{ }}.
@@ -110,6 +136,54 @@ export function parseVariableExpression(expr: string): VariablePath | null {
   const match = trimmed.match(/^\{\{\s*(.*?)\s*\}\}$/);
   const inner = match ? match[1] : trimmed;
   return parseVariablePath(inner);
+}
+
+export type VariableSoftValidationResult = {
+  valid: boolean;
+  warning?: string;
+};
+
+/**
+ * Soft validation for variable paths: structure only (allowed roots), never blocks save.
+ * Unknown root -> valid: false + warning. Unknown step / self-ref / loop segment -> valid: true + warning.
+ */
+export function validateVariable(
+  path: string,
+  context: VariableValidationContext
+): VariableSoftValidationResult {
+  const parsed = parseVariablePath(path);
+  const firstSegment = path.trim().split(".").filter(Boolean)[0];
+
+  if (!parsed) {
+    return {
+      valid: false,
+      warning: firstSegment ? `Unknown variable root: ${firstSegment}` : `Invalid variable syntax: "${path}"`,
+    };
+  }
+
+  const { steps, currentStepId } = context;
+  const stepIds = new Set(steps.map((s) => s.id));
+
+  if (parsed.kind === "step") {
+    if (!parsed.stepId) {
+      return { valid: true, warning: "Step variable is missing step id (may exist at runtime)." };
+    }
+    if (!stepIds.has(parsed.stepId)) {
+      return { valid: true, warning: `Step "${parsed.stepId}" not found (may exist at runtime)` };
+    }
+    if (parsed.stepId === currentStepId) {
+      return { valid: true, warning: "Step cannot reference its own output (may be valid at runtime)." };
+    }
+  }
+
+  if (parsed.kind === "loop") {
+    const allowed = new Set(["item", "index"]);
+    if (parsed.segments.length === 0 || !allowed.has(parsed.segments[0])) {
+      return { valid: true, warning: "Loop variables usually use loop.item or loop.index." };
+    }
+  }
+
+  return { valid: true };
 }
 
 /**
@@ -126,6 +200,8 @@ export function formatVariablePath(path: VariablePath): string {
       return ["run", ...path.segments].join(".");
     case "step":
       return ["steps", path.stepId ?? "", ...path.segments].filter(Boolean).join(".");
+    case "error":
+      return ["error", ...path.segments].join(".");
     default:
       // exhaustive
       return path.segments.join(".");
@@ -180,24 +256,71 @@ export function validateVariablePath(
   return { ok: true };
 }
 
-function objectToTreeNodes(obj: Record<string, unknown>, basePath: string): VariableTreeNode[] {
-  return Object.entries(obj).map(([key, value]) => {
-    const path = `${basePath}.${key}`;
-    if (
-      value != null &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.getPrototypeOf(value) === Object.prototype
-    ) {
-      const children = objectToTreeNodes(value as Record<string, unknown>, path);
-      return {
-        name: key,
-        path,
-        children: children.length ? children : undefined,
-      };
+/**
+ * Run'da saklanan step çıktısı executor'ın döndürdüğü tam nesnedir: { success, output }.
+ * Ağaçta steps.X.output.output hiç görünmemeli; runtime'da da tek .output kullanılıyor.
+ * İç içe { success, output } varsa tekrarlı unwrap yapıyoruz.
+ */
+function getStepOutputPayload(raw: unknown): unknown {
+  let current: unknown = raw;
+  for (;;) {
+    if (current == null || typeof current !== "object" || Array.isArray(current)) return current;
+    const o = current as Record<string, unknown>;
+    if ("output" in o && typeof o.success === "boolean") {
+      current = o.output;
+      continue;
     }
-    return { name: key, path };
-  });
+    return current;
+  }
+}
+
+/**
+ * Ağaçta .output.output hiç olmasın diye: objede sadece "output" (ve isteğe bağlı "success")
+ * varsa içeriğini tekrarlı olarak dışarı al. Böylece wrapper olan objeler açılır,
+ * ama { data, output } gibi gerçek payload'lar olduğu gibi kalır.
+ */
+function flattenOutputKey(payload: unknown): unknown {
+  let current: unknown = payload;
+  for (;;) {
+    if (current == null || typeof current !== "object" || Array.isArray(current)) return current;
+    const o = current as Record<string, unknown>;
+    const keys = Object.keys(o);
+    const looksLikeWrapper = keys.length === 1 && "output" in o ||
+      (keys.length === 2 && "output" in o && "success" in o);
+    if (looksLikeWrapper) {
+      current = o.output;
+      continue;
+    }
+    return current;
+  }
+}
+
+/** step output ağacında .output.output hiç görünmesin diye "output" anahtarını atlayabiliriz */
+function objectToTreeNodes(
+  obj: Record<string, unknown>,
+  basePath: string,
+  options?: { skipOutputKey?: boolean }
+): VariableTreeNode[] {
+  const skipOutputKey = options?.skipOutputKey ?? false;
+  return Object.entries(obj)
+    .filter(([key]) => !(skipOutputKey && key === "output"))
+    .map(([key, value]) => {
+      const path = `${basePath}.${key}`;
+      if (
+        value != null &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Object.getPrototypeOf(value) === Object.prototype
+      ) {
+        const children = objectToTreeNodes(value as Record<string, unknown>, path, options);
+        return {
+          name: key,
+          path,
+          children: children.length ? children : undefined,
+        };
+      }
+      return { name: key, path };
+    });
 }
 
 /**
@@ -210,14 +333,16 @@ export function buildTreeFromOutputSchema(
   const basePath = `steps.${stepId}.output`;
   if (!outputSchema) return [{ name: "output", path: basePath }];
 
-  function schemaToChildren(schema: PluginOutputSchema, path: string): VariableTreeNode[] {
+  function schemaToChildren(schema: PluginOutputSchema, path: string, skipOutputKey = false): VariableTreeNode[] {
     if (schema.properties && typeof schema.properties === "object") {
-      return Object.entries(schema.properties).map(([key, prop]) => {
-        const childPath = path ? `${path}.${key}` : key;
-        const childSchema = prop && typeof prop === "object" && "type" in prop ? (prop as PluginOutputSchema) : null;
-        const children = childSchema ? schemaToChildren(childSchema, childPath) : undefined;
-        return { name: key, path: `${basePath}.${childPath}`, children };
-      });
+      return Object.entries(schema.properties)
+        .filter(([key]) => !(skipOutputKey && key === "output"))
+        .map(([key, prop]) => {
+          const childPath = path ? `${path}.${key}` : key;
+          const childSchema = prop && typeof prop === "object" && "type" in prop ? (prop as PluginOutputSchema) : null;
+          const children = childSchema ? schemaToChildren(childSchema, childPath, skipOutputKey) : undefined;
+          return { name: key, path: `${basePath}.${childPath}`, children };
+        });
     }
     if (schema.items && typeof schema.items === "object") {
       const itemSchema = schema.items as PluginOutputSchema;
@@ -227,7 +352,7 @@ export function buildTreeFromOutputSchema(
     return [];
   }
 
-  const children = schemaToChildren(outputSchema, "");
+  const children = schemaToChildren(outputSchema, "", true);
   return [{ name: "output", path: basePath, children: children.length ? children : undefined }];
 }
 
@@ -245,15 +370,25 @@ export function getVariableTree(
 
   roots.push({
     name: "trigger",
-    children: [{ name: "payload", path: "trigger.payload" }],
+    children: [
+      { name: "body", path: "trigger.body" },
+      { name: "query", path: "trigger.query" },
+      { name: "payload", path: "trigger.payload" },
+    ],
   });
 
   const stepIds = steps.map((s) => s.id).filter((id) => id !== currentStepId);
   if (stepIds.length > 0) {
     const stepChildren: VariableTreeNode[] = stepIds.map((stepId) => {
-      const output = runOutputsByStep?.[stepId];
+      const raw = runOutputsByStep?.[stepId];
+      let output = getStepOutputPayload(raw);
+      output = flattenOutputKey(output);
       if (output != null && typeof output === "object" && !Array.isArray(output)) {
-        const outputChildren = objectToTreeNodes(output as Record<string, unknown>, `steps.${stepId}.output`);
+        const outputChildren = objectToTreeNodes(
+          output as Record<string, unknown>,
+          `steps.${stepId}.output`,
+          { skipOutputKey: true }
+        );
         return {
           name: stepId,
           children: [{ name: "output", children: outputChildren, path: `steps.${stepId}.output` }],
@@ -283,6 +418,15 @@ export function getVariableTree(
   roots.push({
     name: "run",
     children: [{ name: "id", path: "run.id" }],
+  });
+
+  roots.push({
+    name: "error",
+    children: [
+      { name: "message", path: "error.message" },
+      { name: "stepId", path: "error.stepId" },
+      { name: "iteration", path: "error.iteration" },
+    ],
   });
 
   return roots;
@@ -345,14 +489,17 @@ export function resolveVariablePath(path: string): string {
 
 /**
  * Build tree from a step's output object for the JSON viewer.
+ * Unwraps executor shape ve içteki "output" anahtarını düzleştirir; steps.X.output.output hiç görünmez.
  */
 export function buildOutputTree(stepId: string, output: unknown): VariableTreeNode[] {
   const basePath = `steps.${stepId}.output`;
-  if (output == null) return [];
-  if (typeof output !== "object" || Array.isArray(output)) {
+  let payload = getStepOutputPayload(output);
+  payload = flattenOutputKey(payload);
+  if (payload == null) return [];
+  if (typeof payload !== "object" || Array.isArray(payload)) {
     return [{ name: "output", path: basePath }];
   }
-  const children = objectToTreeNodes(output as Record<string, unknown>, basePath);
+  const children = objectToTreeNodes(payload as Record<string, unknown>, basePath, { skipOutputKey: true });
   return [{ name: "output", path: basePath, children: children.length ? children : undefined }];
 }
 
@@ -386,12 +533,14 @@ function collectArrayPaths(obj: unknown, basePath: string): string[] {
  */
 export function getArrayPathsFromRunOutputs(runOutputsByStep: RunOutputsByStep): string[] {
   const paths: string[] = [];
-  for (const [stepId, output] of Object.entries(runOutputsByStep)) {
-    if (output == null) continue;
+  for (const [stepId, raw] of Object.entries(runOutputsByStep)) {
+    if (raw == null) continue;
+    let output = getStepOutputPayload(raw);
+    output = flattenOutputKey(output);
     const basePath = `steps.${stepId}.output`;
     if (Array.isArray(output)) {
       paths.push(basePath);
-    } else if (typeof output === "object" && Object.getPrototypeOf(output) === Object.prototype) {
+    } else if (output != null && typeof output === "object" && Object.getPrototypeOf(output) === Object.prototype) {
       paths.push(...collectArrayPaths(output, basePath));
     }
   }

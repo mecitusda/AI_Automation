@@ -39,6 +39,7 @@ export function RunDataProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const output = await fetchStepOutputPreview(workflowId, stepId);
+        if (output == null) return null;
         const snapshot: StepOutputSnapshot = { stepId, output };
         setSnapshotsByWorkflow((prev) => {
           const wf = prev[workflowId] ?? {

@@ -12,6 +12,7 @@ import type {
   WorkflowVersionInfo,
   VersionDiffResponse
 } from "../api/workflow";
+import { getApiBaseUrl } from "../api/client";
 import WorkflowGraph from "../components/WorkflowGraph";
 import StepDetailModal from "../components/StepDetailModal";
 
@@ -81,20 +82,20 @@ export default function WorkflowDetailPage() {
     }
   };
 
-  if (loading) return <div className="spinner" />;
+  if (loading) return <div className="pageLayout"><div className="spinner" /></div>;
 
-  if (!workflow) return <div>Workflow not found</div>;
+  if (!workflow) return <div className="pageLayout">Workflow not found</div>;
 
   return (
-    <div className="page">
+    <div className="pageLayout">
       {selectedStep && (
   <StepDetailModal
     step={selectedStep}
     onClose={() => setSelectedStep(null)}
   />
 )}
-      <div className="header">
-        <h1>{workflow.name}</h1>
+      <header className="pageHeader">
+        <h1 className="title">{workflow.name}</h1>
         <div className="meta">
           Current Version: <strong>v{workflow.currentVersion}</strong>
           <button onClick={() => navigate(`/workflows/${id}/edit`)}>Edit</button>
@@ -102,7 +103,8 @@ export default function WorkflowDetailPage() {
             {runLoading ? "Starting…" : "Run"}
           </button>
         </div>
-      </div>
+      </header>
+      <main className="pageContent">
       <div className="cards">
         <div className="card">
           <h3>Workflow Graph</h3>
@@ -114,11 +116,55 @@ export default function WorkflowDetailPage() {
         <div className="row">
           <div className="status">
             <div><strong>Status:</strong> {workflow.enabled ? "Enabled" : "Disabled"}</div>
-            <div><strong>Trigger:</strong> {workflow.trigger}</div>
+            <div><strong>Trigger:</strong>{" "}
+              {typeof workflow.trigger === "object" && workflow.trigger !== null
+                ? workflow.trigger.type === "cron"
+                  ? `Cron${(workflow.trigger.cron || workflow.trigger.schedule)
+                      ? ` (${workflow.trigger.cron || workflow.trigger.schedule}${workflow.trigger.timezone ? `, ${workflow.trigger.timezone}` : ""})`
+                      : ""}`
+                  : workflow.trigger.type === "trigger.webhook"
+                    ? "Webhook"
+                    : (workflow.trigger as { type?: string }).type ?? "manual"
+                : String(workflow.trigger ?? "manual")}</div>
             <div><strong>Steps:</strong> {workflow.steps.length}</div>
           </div>
         </div>
       </div>
+
+      {typeof workflow.trigger === "object" && workflow.trigger !== null && workflow.trigger.type === "trigger.webhook" && id && (
+        <div className="card">
+          <h3 className="card-title">Webhook URL</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <input
+              type="text"
+              readOnly
+              value={`${getApiBaseUrl()}/webhook/${id}`}
+              style={{
+                flex: "1 1 280px",
+                minWidth: 0,
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid #374151",
+                background: "#0f172a",
+                color: "#e5e7eb",
+                fontSize: 13,
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const url = `${getApiBaseUrl()}/webhook/${id}`;
+                navigator.clipboard.writeText(url).then(
+                  () => alert("Copied to clipboard"),
+                  () => alert("Copy failed")
+                );
+              }}
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <h3 className="card-title">Versions</h3>
@@ -195,6 +241,7 @@ export default function WorkflowDetailPage() {
           ))}
       </div>
       </div>
+      </main>
     </div>
   );
 }

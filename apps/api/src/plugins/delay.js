@@ -20,6 +20,6 @@ export default {
         });
       }
     });
-    return { success: true, output: { delayed: ms } };
+    return { success: true, output: { delayed: ms }, meta: {} };
   },
 };

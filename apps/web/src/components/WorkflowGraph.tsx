@@ -80,13 +80,17 @@ function getLayoutedElements(steps: Step[], stepStates?: StepState[]) {
     const nodeWithPosition = dagreGraph.node(step.id);
 
     const statesForStep = stepStates?.filter(s => s.stepId === step.id) ?? [];
+    const hasCompleted = statesForStep.some(s => s.status === "completed");
+    const hasSkipped = statesForStep.some(s => s.status === "skipped");
     const primaryState = statesForStep.length === 1
       ? statesForStep[0]
-      : statesForStep.find(s => s.status === "running" || s.status === "pending")
-        ?? statesForStep.find(s => s.status === "completed")
+      : statesForStep.find(s => s.status === "running" || s.status === "pending" || s.status === "retrying")
         ?? statesForStep.find(s => s.status === "failed")
+        ?? statesForStep.find(s => s.status === "skipped")
+        ?? statesForStep.find(s => s.status === "completed")
         ?? statesForStep[0];
     const iterations = statesForStep.map(s => s.iteration ?? 0).sort((a, b) => a - b);
+    const status = (primaryState?.status === "completed" && hasSkipped) ? "partial" : primaryState?.status;
 
     return {
       id: step.id,
@@ -103,7 +107,7 @@ function getLayoutedElements(steps: Step[], stepStates?: StepState[]) {
         stepId: step.id,
         stepType: step.type,
         params: step.params,
-        status: primaryState?.status,
+        status,
         retryCount: primaryState?.retryCount ?? 0,
         iteration: primaryState?.iteration,
         iterations: iterations.length > 0 ? iterations : undefined,

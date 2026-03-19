@@ -87,6 +87,7 @@ export function validateWorkflowGraph(steps) {
 /**
  * Validate workflow payload (name, steps, maxParallel, trigger).
  * Throws with message on validation failure.
+ * Variable validation is not performed here; invalid variables are reported at runtime when resolving context.
  * @param {{ name?: string; steps?: unknown[]; maxParallel?: number; trigger?: object; enabled?: boolean }} body
  * @returns {{ name: string; steps: object[]; maxParallel: number; trigger: object; enabled: boolean }}
  */

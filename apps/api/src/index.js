@@ -43,6 +43,7 @@ app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use("/runs", runRoutes);
 app.use("/trigger", triggerRoutes);
+app.use("/webhook", triggerRoutes);
 app.use("/workflows", workflowRoutes);
 app.use("/credentials", credentialRoutes);
 app.use("/templates", templateRoutes);

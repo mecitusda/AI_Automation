@@ -54,7 +54,7 @@ function VariableNodeInner({ node, depth, onSelectPath, isLast = false }: Variab
       }}
     >
       <div
-        className={`variable-node__row ${isLeaf ? "variable-node__row--leaf" : ""} ${depth === 0 ? "variable-node__row--root" : ""}`}
+        className={`variable-node__row ${isLeaf ? "variable-node__row--leaf" : ""} ${depth === 0 ? "variable-node__row--root" : ""} ${node.path ? "variable-node__row--clickable" : ""}`}
         style={{
           paddingLeft,
           height: ROW_HEIGHT,
@@ -62,10 +62,11 @@ function VariableNodeInner({ node, depth, onSelectPath, isLast = false }: Variab
           paddingBottom: 2,
           paddingRight: 8,
           ["--variable-connector-width" as string]: `${paddingLeft}px`,
+          ...(node.path ? { cursor: "pointer" as const } : {}),
         }}
         onClick={!isLeaf && hasChildren ? handleToggle : undefined}
-        onMouseDown={isLeaf ? handleMouseDown : hasChildren ? undefined : handleMouseDown}
-        draggable={isLeaf}
+        onMouseDown={node.path ? handleMouseDown : undefined}
+        draggable={!!node.path}
         onDragStart={isLeaf ? handleDragStart : undefined}
       >
         {hasChildren ? (
@@ -73,6 +74,7 @@ function VariableNodeInner({ node, depth, onSelectPath, isLast = false }: Variab
             role="button"
             tabIndex={0}
             className="variable-node__toggle"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={handleChevronClick}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleToggle(); } }}
             aria-label={open ? "Collapse" : "Expand"}

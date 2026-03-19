@@ -35,9 +35,13 @@ export default function OpenAINodeForm({ params, onChange, errors, availablePath
     return () => registerInsertHandler(null);
   }, [registerInsertHandler]);
   const model = String(params?.model ?? "gpt-4");
+  const mode = String(params?.mode ?? "generate");
+  const language = String(params?.language ?? "auto");
+  const format = String(params?.format ?? "text");
+  const systemPrompt = String(params?.systemPrompt ?? "");
+  const tone = String(params?.tone ?? "professional");
   const temperature = Number(params?.temperature ?? 0.7);
   const maxTokens = Number(params?.maxTokens ?? 1024);
-  const outputFormat = String(params?.output_format ?? "text");
 
   const set = (key: string, value: unknown) => {
     onChange({ ...params, [key]: value });
@@ -45,6 +49,60 @@ export default function OpenAINodeForm({ params, onChange, errors, availablePath
 
   return (
     <div className="node-form node-form-openai">
+      <div style={sectionStyle}>
+        <FieldLabel style={labelStyle} help={fieldHelp.mode}>
+          Mode
+        </FieldLabel>
+        <select value={mode} onChange={(e) => set("mode", e.target.value)} style={inputStyle}>
+          <option value="summarize">Summarize</option>
+          <option value="generate">Generate</option>
+          <option value="extract">Extract (JSON)</option>
+        </select>
+      </div>
+      <div style={sectionStyle}>
+        <FieldLabel style={labelStyle} help={fieldHelp.language}>
+          Language
+        </FieldLabel>
+        <select value={language} onChange={(e) => set("language", e.target.value)} style={inputStyle}>
+          <option value="auto">Auto</option>
+          <option value="tr">Turkish</option>
+          <option value="en">English</option>
+          <option value="de">German</option>
+        </select>
+      </div>
+      <div style={sectionStyle}>
+        <FieldLabel style={labelStyle} help={fieldHelp.format}>
+          Format
+        </FieldLabel>
+        <select value={format} onChange={(e) => set("format", e.target.value)} style={inputStyle}>
+          <option value="text">Text</option>
+          <option value="json">JSON</option>
+          <option value="bullet">Bullet points</option>
+          <option value="markdown">Markdown</option>
+        </select>
+      </div>
+      <div style={sectionStyle}>
+        <FieldLabel style={labelStyle} help={fieldHelp.systemPrompt}>
+          System prompt
+        </FieldLabel>
+        <textarea
+          value={systemPrompt}
+          onChange={(e) => set("systemPrompt", e.target.value)}
+          placeholder="Optional system instructions for the model"
+          rows={2}
+          style={{ ...inputStyle, resize: "vertical" }}
+        />
+      </div>
+      <div style={sectionStyle}>
+        <FieldLabel style={labelStyle} help={fieldHelp.tone}>
+          Tone
+        </FieldLabel>
+        <select value={tone} onChange={(e) => set("tone", e.target.value)} style={inputStyle}>
+          <option value="formal">Formal</option>
+          <option value="casual">Casual</option>
+          <option value="professional">Professional</option>
+        </select>
+      </div>
       <div style={sectionStyle}>
         <FieldLabel style={labelStyle} help={fieldHelp.model}>
           Model
@@ -123,16 +181,6 @@ export default function OpenAINodeForm({ params, onChange, errors, availablePath
           onChange={(e) => set("maxTokens", Number(e.target.value))}
           style={inputStyle}
         />
-      </div>
-      <div style={sectionStyle}>
-        <FieldLabel style={labelStyle} help={fieldHelp.output_format}>
-          Output format
-        </FieldLabel>
-        <select value={outputFormat} onChange={(e) => set("output_format", e.target.value)} style={inputStyle}>
-          <option value="text">Text</option>
-          <option value="json">JSON</option>
-          <option value="array">Array</option>
-        </select>
       </div>
     </div>
   );

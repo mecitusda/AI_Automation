@@ -62,9 +62,11 @@ export default function WorkflowsPage() {
   };
 
   const handleCreateWorkflow = async () => {
+    const name = window.prompt("Workflow name", "Untitled");
+    if (name == null) return; // cancelled
     setCreating(true);
     try {
-      const w = await createWorkflow({ name: "Untitled" });
+      const w = await createWorkflow({ name: (name.trim() || "Untitled") });
       navigate(`/workflows/${w.id}/edit`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create workflow");
@@ -74,13 +76,14 @@ export default function WorkflowsPage() {
   };
 
   return (
-    <div className="page">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 style={{ margin: 0 }}>Workflows</h1>
+    <div className="pageLayout">
+      <header className="pageHeader">
+        <h1 className="title" style={{ margin: 0 }}>Workflows</h1>
         <button onClick={handleCreateWorkflow} disabled={creating}>
           {creating ? "Creating…" : "New workflow"}
         </button>
-      </div>
+      </header>
+      <main className="pageContent">
       <div className="cards">
       {workflows.map(w => (
         <div 
@@ -118,6 +121,7 @@ export default function WorkflowsPage() {
         </div>
       ))}
       </div>
+      </main>
     </div>
   );
 }

@@ -1,4 +1,33 @@
 import nodemailer from "nodemailer";
+import { promises as dns } from "dns";
+
+/** Basic email format: local@domain.tld */
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Check if recipient domain can receive email (MX or A record exists) */
+async function validateRecipientDomain(email) {
+  const emails = String(email).trim().split(/[\s,;]+/).filter(Boolean);
+  for (const addr of emails) {
+    if (!EMAIL_REGEX.test(addr)) return { ok: false, reason: `Invalid email format: ${addr}` };
+    const match = addr.match(/@([^\s@]+)$/);
+    const domain = match?.[1];
+    if (!domain || domain.length < 4) return { ok: false, reason: `Invalid email format: ${addr}` };
+
+    try {
+      const mx = await dns.resolveMx(domain);
+      if (Array.isArray(mx) && mx.length > 0) continue;
+      const a = await dns.resolve4(domain).catch(() => []);
+      if (Array.isArray(a) && a.length > 0) continue;
+      return { ok: false, reason: `Domain "${domain}" has no mail servers. Check: ${addr}` };
+    } catch (err) {
+      if (err?.code === "ENOTFOUND" || err?.code === "ENODATA") {
+        return { ok: false, reason: `Domain "${domain}" not found. Email may be wrong (typo?): ${addr}` };
+      }
+      return { ok: false, reason: err?.message || String(err) };
+    }
+  }
+  return { ok: true };
+}
 
 function getTransport() {
   const host = process.env.SMTP_HOST;
@@ -49,27 +78,87 @@ export default {
     const subject = String(params?.subject ?? "").trim();
     const body = String(params?.body ?? "");
     if (!to || to === "[object Object]") throw new Error("email step requires params.to as a string or object with .email (e.g. {{ loop.item.email }})");
-    console.log("to", to);
+
     const transport = getTransport();
-    if (transport) {
+    if (!transport) {
+      return {
+        success: false,
+        output: null,
+        meta: {
+          errorMessage: "SMTP not configured: set SMTP_HOST, SMTP_USER, SMTP_PASS (or SMTP_PASSWORD) in environment",
+        },
+      };
+    }
+
+    const domainCheck = await validateRecipientDomain(to);
+    if (!domainCheck.ok) {
+      return {
+        success: false,
+        output: null,
+        meta: { errorMessage: domainCheck.reason },
+      };
+    }
+
+    try {
+      await transport.verify();
+    } catch (err) {
+      const msg = err?.message || String(err);
+      return {
+        success: false,
+        output: null,
+        meta: {
+          errorMessage: msg.includes("Invalid login") || msg.includes("authentication") || msg.includes("Authentication")
+            ? "SMTP authentication failed: check SMTP_USER and SMTP_PASS (use App Password for Gmail)"
+            : msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT")
+              ? `SMTP connection failed: ${msg}`
+              : msg,
+        },
+      };
+    }
+
+    const startAt = Date.now();
+    try {
       const from = process.env.SMTP_FROM || process.env.SMTP_USER || "noreply@localhost";
       const info = await transport.sendMail({
         from,
         to,
         subject: subject || "(no subject)",
         text: body,
-        html: body ? body.replace(/\n/g, "<br>") : ""
+        html: body ? body.replace(/\n/g, "<br>") : "",
       });
+
+      const rejected = info?.rejected;
+      if (Array.isArray(rejected) && rejected.length > 0) {
+        return {
+          success: false,
+          output: { sent: false, to, subject, bodyLength: body.length, rejected },
+          meta: {
+            durationMs: Date.now() - startAt,
+            errorMessage: `Email rejected by server for recipient(s): ${rejected.join(", ")}`,
+          },
+        };
+      }
+
       return {
         success: true,
-        output: { sent: true, to, subject, bodyLength: body.length, messageId: info.messageId },
+        output: { sent: true, to, subject, bodyLength: body.length, messageId: info?.messageId },
+        meta: { durationMs: Date.now() - startAt },
+      };
+    } catch (err) {
+      const msg = err?.message || String(err);
+      return {
+        success: false,
+        output: null,
+        meta: {
+          durationMs: Date.now() - startAt,
+          errorMessage: msg.includes("Invalid login") || msg.includes("authentication") || msg.includes("Authentication")
+            ? "SMTP authentication failed: check SMTP_USER and SMTP_PASS (use App Password for Gmail)"
+            : msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT")
+              ? `SMTP connection failed: ${msg}`
+              : msg,
+        },
       };
     }
-
-    return {
-      success: true,
-      output: { sent: true, to, subject, bodyLength: body.length },
-    };
   },
   validate: (params) => {
     const err = {};

@@ -92,15 +92,16 @@ export default function RunsPage() {
   
 
   return (
-    <div className="page">
+    <div className="pageLayout">
       {loading ? <div className="spinner"></div> :
 
         <>
-      <div className="header">
+      <header className="pageHeader">
         <h1 className="title">Workflow Runs</h1>
         <div className="meta">Total: {runs.length}</div>
-      </div>
-       <div className="section">
+      </header>
+      <main className="pageContent">
+       <div className="pageSection">
         <div className="metricsTitle">System Health</div>
 
         <div className="metricsGrid">
@@ -132,7 +133,9 @@ export default function RunsPage() {
 </div>
         </div>
       </div>
+      <div className="pageSection">
       <MonitoringCard />
+      </div>
       <div className="grid">
         {runs.map((run) => {
           const pct = progressPercent(run);
@@ -172,6 +175,7 @@ export default function RunsPage() {
           );
         })}
       </div>
+      </main>
       </>
       }
     </div>

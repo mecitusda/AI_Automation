@@ -24,6 +24,7 @@ export default {
     return {
       success: true,
       output: { sent: true, channel, textLength: String(text).length },
+      meta: {},
     };
   },
   validate: (params) => {

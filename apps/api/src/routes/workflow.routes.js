@@ -64,7 +64,7 @@ router.get("/:id", async (req, res) => {
       enabled: wf.enabled,
       currentVersion: wf.currentVersion,
       maxParallel: wf.maxParallel,
-      trigger: wf.trigger?.type ?? "manual",
+      trigger: wf.trigger ?? { type: "manual" },
       steps: wf.steps
     });
   } catch (err) {
@@ -89,13 +89,15 @@ router.get("/:id/steps/:stepId/output-preview", async (req, res) => {
       .lean();
 
     if (!run) {
-      return res.status(404).json({ error: "No run found for this workflow. Run the workflow first." });
+      // For editor preview: returning null avoids 404 console spam.
+      return res.json(null);
     }
 
     const outputs = run.outputs || {};
     const stepOutput = outputs[stepId];
     if (stepOutput == null) {
-      return res.status(404).json({ error: "No output for this step in the latest run." });
+      // For editor preview: returning null avoids 404 console spam.
+      return res.json(null);
     }
 
     const firstIteration = typeof stepOutput === "object" && !Array.isArray(stepOutput)
@@ -408,7 +410,7 @@ router.post("/:id/validate-variables", async (req, res) => {
 
           // Basic root validation
           const root = parts[0];
-          if (!["trigger", "steps", "loop", "run"].includes(root)) {
+          if (!["trigger", "steps", "loop", "run", "error"].includes(root)) {
             vars.push({ path: expr, ok: false, error: `Unknown root "${root}" in variable "${expr}"` });
             continue;
           }
