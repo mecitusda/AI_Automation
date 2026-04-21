@@ -5,7 +5,8 @@ export let channel;
 export async function connectRabbit() {
   const connection = await amqp.connect(process.env.RABBIT_URL);
   channel = await connection.createChannel();
-  await channel.prefetch(5)
+  const prefetch = Number(process.env.WORKER_MAX_CONCURRENCY || 5);
+  await channel.prefetch(Number.isFinite(prefetch) && prefetch > 0 ? prefetch : 5);
   await channel.assertExchange("automation.direct", "direct", { durable: true });
 
 

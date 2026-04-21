@@ -41,6 +41,12 @@ export type RunDetailLog = {
   createdAt?: string;
 };
 
+export type RunDetailStepInput = {
+  executionId?: string;
+  params?: Record<string, unknown>;
+  startedAt?: string;
+};
+
 export type RunDetail = {
   id: string;
   workflowId?: string;
@@ -54,6 +60,9 @@ export type RunDetail = {
   outputs: Record<string, unknown>;
   logs?: RunDetailLog[];
   loopContext?: unknown;
+  lastError?: { stepId?: string; message?: string; iteration?: number; attempt?: number } | null;
+  /** Key: `${stepId}::${iteration}` */
+  stepInputs?: Record<string, RunDetailStepInput>;
 };
 
 export async function fetchRunDetail(id: string): Promise<RunDetail> {

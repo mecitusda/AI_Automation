@@ -171,8 +171,12 @@ export default {
         }
       : undefined;
 
-    let output = text;
-    if (mode === "extract") {
+    const format = params?.format || "text";
+    const strictJson = mode === "extract" || format === "json";
+
+    let output;
+
+    if (strictJson) {
       try {
         const firstBrace = text.indexOf("{");
         const firstBracket = text.indexOf("[");
@@ -185,8 +189,16 @@ export default {
           jsonStr = end > firstBracket ? text.slice(firstBracket, end + 1) : text.slice(firstBracket);
         }
         output = JSON.parse(jsonStr);
+        if (!output || typeof output !== "object") {
+          throw new Error("Invalid JSON structure");
+        }
       } catch (e) {
-        throw new Error(`Extract mode requires valid JSON. Parse error: ${e?.message || "Invalid JSON"}`);
+        console.log("[AI ERROR] Invalid JSON:", text);
+        throw new Error(
+          mode === "extract"
+            ? "Invalid JSON response from AI"
+            : "AI did not return valid JSON"
+        );
       }
     } else {
       const trimmed = String(text).trim();
@@ -194,7 +206,7 @@ export default {
         try {
           output = JSON.parse(text);
         } catch {
-          // leave as string
+          output = text;
         }
       } else {
         const arrayMatch = text.match(/\[[\s\S]*\]/);
@@ -202,11 +214,11 @@ export default {
           try {
             output = JSON.parse(arrayMatch[0]);
           } catch {
-            // leave as string
+            output = text;
           }
         }
       }
-      output = normalizeAIOutput(output, { logger: (msg) => console.log(msg) });
+      output = normalizeAIOutput(output ?? text, { logger: (msg) => console.log(msg) });
     }
 
     return { success: true, output, meta: tokens ? { tokens } : {} };

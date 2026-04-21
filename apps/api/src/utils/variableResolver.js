@@ -1,4 +1,5 @@
 export function resolveVariables(obj, context) {
+  const debugRun = process.env.DEBUG_RUN === "true";
 
   const { steps, run, trigger, env, loop, error } = context;
   
@@ -44,17 +45,39 @@ export function resolveVariables(obj, context) {
     } else {
       return "";
     }
-    return parts.reduce((acc, key) => {
+    const resolved = parts.reduce((acc, key, idx) => {
 
   
 
   if (acc instanceof Map) {
-    return acc.get(key);
+    const mapped = acc.get(key);
+    // Backward-compat: {{ trigger.<field> }} -> {{ trigger.body.<field> }}
+    if (
+      mapped === undefined &&
+      root === "trigger" &&
+      idx === 0
+    ) {
+      const body = acc.get("body");
+      if (body instanceof Map) return body.get(key);
+      return body?.[key];
+    }
+    return mapped;
   }
 
-  return acc?.[key];
+  const direct = acc?.[key];
+  // Backward-compat: {{ trigger.<field> }} -> {{ trigger.body.<field> }}
+  if (
+    direct === undefined &&
+    root === "trigger" &&
+    idx === 0
+  ) {
+    return acc?.body?.[key];
+  }
+
+  return direct;
 
 }, source);
+    return resolved;
   }
 
   /* ---------------- STRING ---------------- */
@@ -68,6 +91,16 @@ export function resolveVariables(obj, context) {
     if (pureMatch) {
 
       const result = resolvePath(pureMatch[1]);
+      if (debugRun) {
+        console.log(JSON.stringify({
+          level: "info",
+          event: "variables.resolve.pure",
+          timestamp: new Date().toISOString(),
+          runId: run?._id?.toString?.() ?? undefined,
+          expression: pureMatch[1]?.trim(),
+          message: "Resolved pure variable expression"
+        }));
+      }
 
       return result; // ARRAY / OBJECT olduğu gibi döner
     }

@@ -4,6 +4,23 @@ import { promises as dns } from "dns";
 /** Basic email format: local@domain.tld */
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw new Error("Aborted");
+  }
+}
+
+async function raceWithAbort(promise, signal) {
+  if (!signal) return promise;
+  throwIfAborted(signal);
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true });
+    })
+  ]);
+}
+
 /** Check if recipient domain can receive email (MX or A record exists) */
 async function validateRecipientDomain(email) {
   const emails = String(email).trim().split(/[\s,;]+/).filter(Boolean);
@@ -68,7 +85,8 @@ export default {
       bodyLength: { type: "number" },
     },
   },
-  executor: async ({ params }) => {
+  executor: async ({ params, signal }) => {
+    throwIfAborted(signal);
     const rawTo = params?.to;
     const to = typeof rawTo === "string"
       ? rawTo.trim()
@@ -91,6 +109,7 @@ export default {
     }
 
     const domainCheck = await validateRecipientDomain(to);
+    throwIfAborted(signal);
     if (!domainCheck.ok) {
       return {
         success: false,
@@ -100,7 +119,7 @@ export default {
     }
 
     try {
-      await transport.verify();
+      await raceWithAbort(transport.verify(), signal);
     } catch (err) {
       const msg = err?.message || String(err);
       return {
@@ -118,14 +137,15 @@ export default {
 
     const startAt = Date.now();
     try {
+      throwIfAborted(signal);
       const from = process.env.SMTP_FROM || process.env.SMTP_USER || "noreply@localhost";
-      const info = await transport.sendMail({
+      const info = await raceWithAbort(transport.sendMail({
         from,
         to,
         subject: subject || "(no subject)",
         text: body,
         html: body ? body.replace(/\n/g, "<br>") : "",
-      });
+      }), signal);
 
       const rejected = info?.rejected;
       if (Array.isArray(rejected) && rejected.length > 0) {

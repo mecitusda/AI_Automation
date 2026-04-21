@@ -2,18 +2,36 @@ import express from "express";
 import { Run } from "../models/run.model.js";
 import { channel } from "../config/rabbit.js";
 import { createReplayRun } from "../utils/runReplay.js";
+import { TelegramEvent } from "../models/telegramEvent.model.js";
 
 const router = express.Router();
+const ownedRunQuery = (req, id) => ({ _id: id, userId: req.user.id });
+
+/** Mongoose Map in .lean() may be a plain object; support both. */
+function leanMapToRecord(value) {
+  if (value == null) return {};
+  if (typeof value.entries === "function") {
+    return Object.fromEntries(value.entries());
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return { ...value };
+  }
+  return {};
+}
 
 router.post("/:id/replay", async (req, res) => {
   try {
     const runId = req.params.id;
     const fromStepId = req.body?.fromStepId;
+    const iteration = req.body?.iteration;
     if (!fromStepId || typeof fromStepId !== "string") {
       return res.status(400).json({ error: "fromStepId (string) required" });
     }
+    if (iteration != null && (!Number.isInteger(Number(iteration)) || Number(iteration) < 0)) {
+      return res.status(400).json({ error: "iteration must be a non-negative integer" });
+    }
 
-    const sourceRun = await Run.findById(runId).lean();
+    const sourceRun = await Run.findOne(ownedRunQuery(req, runId)).lean();
     if (!sourceRun) return res.status(404).json({ error: "Run not found" });
 
     const terminal = ["completed", "failed", "cancelled"].includes(sourceRun.status);
@@ -27,8 +45,12 @@ router.post("/:id/replay", async (req, res) => {
       return res.status(400).json({ error: "fromStepId not found in workflow snapshot" });
     }
 
-    const payload = createReplayRun(sourceRun, fromStepId);
-    const newRun = await Run.create(payload);
+    const payload = createReplayRun(
+      sourceRun,
+      fromStepId,
+      iteration != null ? Number(iteration) : undefined
+    );
+    const newRun = await Run.create({ ...payload, userId: req.user.id });
 
     await channel.publish(
       "automation.direct",
@@ -44,7 +66,7 @@ router.post("/:id/replay", async (req, res) => {
 
 router.get("/:id/summary", async (req, res) => {
   try {
-    const run = await Run.findById(req.params.id);
+    const run = await Run.findOne(ownedRunQuery(req, req.params.id));
 
     if (!run) {
       return res.status(404).json({ error: "Run not found" });
@@ -65,7 +87,7 @@ router.get("/:id/summary", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const run = await Run.findById(req.params.id)
+    const run = await Run.findOne(ownedRunQuery(req, req.params.id))
       .populate("workflowId", "name")
       .lean();
 
@@ -87,7 +109,7 @@ router.get("/:id", async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    const runs = await Run.find()
+    const runs = await Run.find({ userId: req.user.id })
       .sort({ createdAt: -1 })
       .limit(50);
 
@@ -100,6 +122,10 @@ router.get("/", async (req, res) => {
 router.post("/:id/cancel", async (req, res) => {
   try {
     const runId = req.params.id;
+    const run = await Run.findOne(ownedRunQuery(req, runId)).select({ _id: 1 }).lean();
+    if (!run) {
+      return res.status(404).json({ error: "Run not found" });
+    }
 
     await channel.sendToQueue(
       "run.cancel.q",
@@ -112,7 +138,7 @@ router.post("/:id/cancel", async (req, res) => {
       { persistent: true }
     );
 
-    res.json({ message: "Cancel requested", runId });
+    res.json({ message: "Cancel requested", runId: run._id.toString() });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -126,7 +152,7 @@ router.post("/:id/cancel", async (req, res) => {
 router.get("/:id/detail", async (req, res) => {
   try {
     const runId = req.params.id;
-    const run = await Run.findById(runId).lean();
+    const run = await Run.findOne(ownedRunQuery(req, runId)).lean();
     if (!run) {
       return res.status(404).json({ error: "Run not found" });
     }
@@ -152,12 +178,7 @@ router.get("/:id/detail", async (req, res) => {
       executionId: st.executionId,
     }));
 
-    const outputs = {};
-    if (run.outputs) {
-      for (const [key, val] of run.outputs.entries()) {
-        outputs[key] = val;
-      }
-    }
+    const outputs = leanMapToRecord(run.outputs);
 
     const logs = (run.logs || []).map((l) => ({
       stepId: l.stepId,
@@ -169,6 +190,16 @@ router.get("/:id/detail", async (req, res) => {
       error: l.error,
       createdAt: l.createdAt,
     }));
+
+    const stepInputs = leanMapToRecord(run.stepInputs);
+
+    const telegramEvents = await TelegramEvent.find({
+      userId: req.user.id,
+      runId
+    })
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
 
     res.json({
       id: run._id.toString(),
@@ -183,6 +214,9 @@ router.get("/:id/detail", async (req, res) => {
       outputs,
       logs,
       loopContext: run.loopContext || null,
+      lastError: run.lastError || null,
+      stepInputs,
+      telegramEvents,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -199,7 +233,7 @@ router.get("/:id/steps/:stepId/:iteration?", async (req, res) => {
     const iterationParam = req.params.iteration;
     const iteration = iterationParam !== undefined ? Number(iterationParam) : undefined;
 
-    const run = await Run.findById(id).lean();
+    const run = await Run.findOne(ownedRunQuery(req, id)).lean();
     if (!run) {
       return res.status(404).json({ error: "Run not found" });
     }

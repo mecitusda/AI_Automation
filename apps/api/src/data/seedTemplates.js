@@ -1,4 +1,5 @@
 import { Template } from "../models/template.model.js";
+import { User } from "../models/user.model.js";
 
 const EXAMPLE_TEMPLATES = [
   {
@@ -59,6 +60,15 @@ const EXAMPLE_TEMPLATES = [
 export async function seedTemplatesIfEmpty() {
   const count = await Template.countDocuments();
   if (count > 0) return;
-  await Template.insertMany(EXAMPLE_TEMPLATES);
+  let owner = await User.findOne().sort({ createdAt: 1 });
+  if (!owner) {
+    owner = await User.create({
+      email: "admin@local.dev",
+      passwordHash: "seeded-no-login",
+      name: "System Admin",
+      role: "admin"
+    });
+  }
+  await Template.insertMany(EXAMPLE_TEMPLATES.map((t) => ({ ...t, userId: owner._id })));
   console.log("Seeded", EXAMPLE_TEMPLATES.length, "templates");
 }

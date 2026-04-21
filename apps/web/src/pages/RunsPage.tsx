@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { socket } from "../api/socket";
+import { apiFetch, getCurrentUserRole } from "../api/client";
 import "../styles/runs.css";
 import MonitoringCard from "../components/MonitoringCard";
 import { useSummary } from "../hooks/useSummary";
@@ -10,6 +11,7 @@ type StepState = {
   retryCount: number;
   status: "pending" | "running" | "retrying" | "completed" | "failed";
   durationMs?: number;
+  iteration?: number;
 };
 
 type Run = {
@@ -34,14 +36,15 @@ type RunUpdatePayload = {
 export default function RunsPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
-  const summary = useSummary(3600);
+  const isAdmin = getCurrentUserRole() === "admin";
+  const summary = useSummary(3600, isAdmin);
   useEffect(() => {
-    fetch("http://localhost:4000/runs")
-      .then((r) => r.json())
-      .then((data: Run[]) => {
+    apiFetch<Run[]>("/runs")
+      .then((data) => {
         setRuns(data);
         setLoading(false);
-      });
+      })
+      .catch(() => setLoading(false));
   }, []);
   
   useEffect(() => {
@@ -84,6 +87,8 @@ export default function RunsPage() {
   }, []);
 
   const progressPercent = (run: Run) => {
+    // Run finished (completed/failed/cancelled) → 100% (task completion, like n8n)
+    if (["completed", "failed", "cancelled"].includes(run.status)) return 100;
     if (!run.stepStates?.length) return 0;
     const completed = run.stepStates.filter((s) => s.status === "completed").length;
     return Math.round((completed / run.stepStates.length) * 100);
@@ -101,41 +106,43 @@ export default function RunsPage() {
         <div className="meta">Total: {runs.length}</div>
       </header>
       <main className="pageContent">
-       <div className="pageSection">
-        <div className="metricsTitle">System Health</div>
+      {isAdmin && (
+        <>
+          <div className="pageSection">
+            <div className="metricsTitle">System Health</div>
+            <div className="metricsGrid">
+              <div className="metric">
+                <div className="metricLabel">Runs (1h)</div>
+                <div className="metricValue">
+                  {summary
+                    ? Object.values(summary.runsByStatus || {}).reduce((a, b) => a + b, 0)
+                    : "—"}
+                </div>
+                <div className="metricHint">
+                  ✅ {summary?.runsByStatus?.completed ?? 0} ·
+                  ❌ {summary?.runsByStatus?.failed ?? 0} ·
+                  ⏳ {summary?.runsByStatus?.running ?? 0}
+                </div>
+              </div>
 
-        <div className="metricsGrid">
-       
-<div className="metric">
-  <div className="metricLabel">Runs (1h)</div>
-  <div className="metricValue">
-    {summary
-      ? Object.values(summary.runsByStatus || {}).reduce((a, b) => a + b, 0)
-      : "—"}
-  </div>
-  <div className="metricHint">
-    ✅ {summary?.runsByStatus?.completed ?? 0} ·
-    ❌ {summary?.runsByStatus?.failed ?? 0} ·
-    ⏳ {summary?.runsByStatus?.running ?? 0}
-  </div>
-</div>
-
-<div className="metric">
-  <div className="metricLabel">
-    Errors / Retry / Timeout (last 1 hour)
-  </div>
-  <div className="metricValue">
-    {summary
-      ? `${summary.logs.errorCount} / ${summary.logs.retryLogCount} / ${summary.logs.timeoutHintCount}`
-      : "—"}
-  </div>
-  <div className="metricHint">log-based counters</div>
-</div>
-        </div>
-      </div>
-      <div className="pageSection">
-      <MonitoringCard />
-      </div>
+              <div className="metric">
+                <div className="metricLabel">
+                  Errors / Retry / Timeout (last 1 hour)
+                </div>
+                <div className="metricValue">
+                  {summary
+                    ? `${summary.logs.errorCount} / ${summary.logs.retryLogCount} / ${summary.logs.timeoutHintCount}`
+                    : "—"}
+                </div>
+                <div className="metricHint">log-based counters</div>
+              </div>
+            </div>
+          </div>
+          <div className="pageSection">
+            <MonitoringCard enabled={isAdmin} />
+          </div>
+        </>
+      )}
       <div className="grid">
         {runs.map((run) => {
           const pct = progressPercent(run);
@@ -163,8 +170,8 @@ export default function RunsPage() {
                 </div>
 
                 <div className="badgesRow">
-                  {run.stepStates?.map((step) => (
-                    <span key={step.stepId} className={`stepBadge ${step.status}`}>
+                  {run.stepStates?.map((step, idx) => (
+                    <span key={`${step.stepId}:${step.iteration ?? "na"}:${idx}`} className={`stepBadge ${step.status}`}>
                       {step.stepId}
                       {step.retryCount > 0 && <span className="retryChip">R{step.retryCount}</span>}
                     </span>

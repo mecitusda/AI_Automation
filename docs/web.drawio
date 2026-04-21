@@ -25,7 +25,7 @@
         <mxCell id="app-workflow-detail" value="  WorkflowDetailPage (read-only view)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="app-group" vertex="1">
           <mxGeometry y="66" width="300" height="20" as="geometry"/>
         </mxCell>
-        <mxCell id="app-runs" value="  RunsPage, RunDetailPage" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="app-group" vertex="1">
+        <mxCell id="app-runs" value="  RunsPage, RunDetailPage (Execution Graph)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="app-group" vertex="1">
           <mxGeometry y="86" width="300" height="20" as="geometry"/>
         </mxCell>
         <mxCell id="app-debugger" value="  RunDebuggerPanel (Input, Logs, step viewer)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="app-group" vertex="1">
@@ -45,10 +45,10 @@
         <mxCell id="editor-graph" value="  WorkflowGraph (nodes, edges, onConnect)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="editor-group" vertex="1">
           <mxGeometry y="46" width="320" height="20" as="geometry"/>
         </mxCell>
-        <mxCell id="editor-default-node" value="  DefaultNode (handles, summaryTemplate)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="editor-group" vertex="1">
+        <mxCell id="editor-default-node" value="  DefaultNode (handles, summaryTemplate, iteration X/Y)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="editor-group" vertex="1">
           <mxGeometry y="66" width="320" height="20" as="geometry"/>
         </mxCell>
-        <mxCell id="editor-if-node" value="  IfNode (branch handles)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="editor-group" vertex="1">
+        <mxCell id="editor-if-node" value="  IfNode (branch handles, iteration X/Y badge)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="editor-group" vertex="1">
           <mxGeometry y="86" width="320" height="20" as="geometry"/>
         </mxCell>
         <mxCell id="editor-handles" value="  Node handles (inputs, outputs, errorOutput)" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;fontColor=#1a1a1a;" parent="editor-group" vertex="1">

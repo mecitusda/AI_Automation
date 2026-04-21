@@ -7,9 +7,9 @@ import { channel } from "../config/rabbit.js";
 
 const router = express.Router();
 
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const list = await Template.find().select("name description category createdAt").lean();
+    const list = await Template.find({ userId: req.user.id }).select("name description category createdAt").lean();
     return res.json(
       list.map((d) => ({
         id: d._id.toString(),
@@ -26,7 +26,7 @@ router.get("/", async (_req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const doc = await Template.findById(req.params.id).lean();
+    const doc = await Template.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!doc) return res.status(404).json({ error: "Template not found" });
     return res.json({
       id: doc._id.toString(),
@@ -43,7 +43,7 @@ router.get("/:id", async (req, res) => {
 
 router.post("/install/:id", async (req, res) => {
   try {
-    const template = await Template.findById(req.params.id).lean();
+    const template = await Template.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!template) return res.status(404).json({ error: "Template not found" });
     const workflowPayload = template.workflow;
     if (!workflowPayload || typeof workflowPayload !== "object") {
@@ -56,6 +56,7 @@ router.post("/install/:id", async (req, res) => {
     };
     const validated = validateWorkflowPayload(payloadToValidate);
     const workflow = await Workflow.create({
+      userId: req.user.id,
       name: validated.name,
       steps: validated.steps,
       maxParallel: validated.maxParallel,

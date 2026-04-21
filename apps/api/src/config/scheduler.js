@@ -2,11 +2,12 @@ import cron from "node-cron";
 import { Workflow } from "../models/workflow.model.js";
 import { Run } from "../models/run.model.js";
 import { channel } from "./rabbit.js";
+import { logInfo } from "../utils/logger.js";
 
 const activeJobs = new Map();
 
 export async function startScheduler() {
-  console.log("Scheduler starting...");
+  logInfo("scheduler.starting", { message: "Scheduler starting..." });
 
   const workflows = await Workflow.find({
     enabled: true,
@@ -36,7 +37,10 @@ export function registerCronWorkflow(workflow) {
   }
 
   const job = cron.schedule(cronExpression, async () => {
-    console.log("[CRON] Trigger fired for workflow", workflow.name);
+    logInfo("scheduler.cron.trigger", {
+      workflowId: workflow._id?.toString(),
+      message: `Trigger fired for workflow ${workflow.name}`
+    });
 
     const existingRunning = await Run.findOne({
       workflowId: workflow._id,
@@ -44,11 +48,15 @@ export function registerCronWorkflow(workflow) {
     });
 
     if (existingRunning) {
-      console.log("[CRON] Skipping workflow", workflow.name, "(already running)");
+      logInfo("scheduler.cron.skip_running", {
+        workflowId: workflow._id?.toString(),
+        message: `Skipping workflow ${workflow.name} (already running)`
+      });
       return;
     }
 
     const run = await Run.create({
+      userId: workflow.userId,
       workflowId: workflow._id,
       workflowVersion: workflow.currentVersion ?? 1,
       status: "queued",

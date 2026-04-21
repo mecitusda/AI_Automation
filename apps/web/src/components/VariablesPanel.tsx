@@ -22,7 +22,7 @@ export default function VariablesPanel({
     <div className={className ? `variables-panel ${className}` : "variables-panel"}>
       <header className="variables-panel__header">
         <h3 className="variables-panel__title">Variables</h3>
-        <p className="variables-panel__hint">Click a path to insert into the focused field.</p>
+        <p className="variables-panel__hint">Click or drag a path into the focused field.</p>
       </header>
       <div className="variables-panel__scroll">
         <VariableTree tree={tree} onSelectPath={onSelectPath} hideLabel />

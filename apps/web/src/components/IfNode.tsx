@@ -103,6 +103,25 @@ export default function IfNode({ id, data }: NodeProps) {
             {(data.iteration ?? 0) + 1}/{data.iterations.length}
           </span>
         )}
+        {String(data.status) === "failed" && (data as { failureHint?: string }).failureHint ? (
+          <div
+            style={{
+              fontSize: 9,
+              color: "#fca5a5",
+              marginTop: 4,
+              maxWidth: 90,
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              lineHeight: 1.2,
+            }}
+            title={String((data as { failureHint?: string }).failureHint)}
+          >
+            {(() => {
+              const h = String((data as { failureHint?: string }).failureHint ?? "");
+              return h.length > 100 ? `${h.slice(0, 100)}…` : h;
+            })()}
+          </div>
+        ) : null}
       </div>
       {outputs.map((h, i) => {
         const top = outputs.length === 1 ? "50%" : i === 0 ? "35%" : "65%";

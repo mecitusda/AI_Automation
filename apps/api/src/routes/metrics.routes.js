@@ -1,6 +1,7 @@
 import express from "express";
 import { redis } from "../config/redis.js";
 import { Run } from "../models/run.model.js";
+import { getMetricsCounters } from "../utils/metricsCounter.js";
 
 const router = express.Router();
 
@@ -111,6 +112,7 @@ router.get("/summary", async (req, res) => {
     const retryLogCount = agg?.retryLogs?.[0]?.retryLogCount ?? 0;
     const timeoutHintCount = agg?.timeoutHints?.[0]?.timeoutHintCount ?? 0;
 
+    const counters = await getMetricsCounters();
     res.json({
       ok: true,
       ts: Date.now(),
@@ -124,6 +126,7 @@ router.get("/summary", async (req, res) => {
         retryLogCount,
         timeoutHintCount,
       },
+      counters,
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message || String(err) });
@@ -160,8 +163,16 @@ router.get("/dashboard", async (req, res) => {
             { $match: { "stepStates.stepId": { $exists: true } } },
             {
               $group: {
-                _id: { stepId: "$stepStates.stepId", status: "$stepStates.status" },
-                count: { $sum: 1 },
+                _id: "$stepStates.stepId",
+                totalCount: { $sum: 1 },
+                failedCount: {
+                  $sum: { $cond: [{ $eq: ["$stepStates.status", "failed"] }, 1, 0] }
+                },
+                completedCount: {
+                  $sum: { $cond: [{ $eq: ["$stepStates.status", "completed"] }, 1, 0] }
+                },
+                totalRetry: { $sum: "$stepStates.retryCount" },
+                avgDurationMs: { $avg: "$stepStates.durationMs" },
               },
             },
           ],
@@ -181,12 +192,14 @@ router.get("/dashboard", async (req, res) => {
     let stepExecutionCount = 0;
     const byStepId = {};
     for (const s of stepStats) {
-      const stepId = s._id?.stepId ?? "unknown";
-      const status = s._id?.status ?? "unknown";
-      stepExecutionCount += s.count;
-      if (!byStepId[stepId]) byStepId[stepId] = { failed: 0, completed: 0 };
-      if (status === "failed") byStepId[stepId].failed += s.count;
-      if (status === "completed") byStepId[stepId].completed += s.count;
+      const stepId = s._id ?? "unknown";
+      stepExecutionCount += s.totalCount ?? 0;
+      byStepId[stepId] = {
+        failed: s.failedCount ?? 0,
+        completed: s.completedCount ?? 0,
+        retries: s.totalRetry ?? 0,
+        avgDurationMs: s.avgDurationMs ?? null,
+      };
     }
     const totals = Object.values(byStepId).reduce(
       (acc, v) => ({ failed: acc.failed + v.failed, completed: acc.completed + v.completed }),
@@ -195,7 +208,14 @@ router.get("/dashboard", async (req, res) => {
     if (totals.failed + totals.completed > 0) {
       stepFailureRate = totals.failed / (totals.failed + totals.completed);
     }
+    const stepMetrics = Object.entries(byStepId).map(([stepId, v]) => ({
+      stepId,
+      avgDurationMs: v.avgDurationMs,
+      retryCount: v.retries,
+      failureRate: (v.failed + v.completed) > 0 ? v.failed / (v.failed + v.completed) : null
+    }));
 
+    const counters = await getMetricsCounters();
     res.json({
       ok: true,
       ts: Date.now(),
@@ -205,6 +225,8 @@ router.get("/dashboard", async (req, res) => {
       activeRuns,
       runsPerWorkflow,
       stepExecutionCount,
+      stepMetrics,
+      counters,
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message || String(err) });

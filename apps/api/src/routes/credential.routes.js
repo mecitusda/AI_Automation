@@ -19,7 +19,7 @@ router.post("/", async (req, res) => {
     } catch (err) {
       return res.status(500).json({ error: err.message || "Encryption failed" });
     }
-    const doc = await Credential.create({ name, type, data: encryptedData });
+    const doc = await Credential.create({ name, type, data: encryptedData, userId: req.user.id });
     return res.status(201).json({
       id: doc._id.toString(),
       name: doc.name,
@@ -33,7 +33,7 @@ router.post("/", async (req, res) => {
 
 router.get("/", async (_req, res) => {
   try {
-    const list = await Credential.find().select("name type createdAt").lean();
+    const list = await Credential.find({ userId: _req.user.id }).select("name type createdAt").lean();
     return res.json(
       list.map((d) => ({
         id: d._id.toString(),
@@ -49,7 +49,7 @@ router.get("/", async (_req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const doc = await Credential.findById(req.params.id).select("name type createdAt").lean();
+    const doc = await Credential.findOne({ _id: req.params.id, userId: req.user.id }).select("name type createdAt").lean();
     if (!doc) return res.status(404).json({ error: "Credential not found" });
     return res.json({
       id: doc._id.toString(),
@@ -64,7 +64,7 @@ router.get("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    const result = await Credential.findByIdAndDelete(req.params.id);
+    const result = await Credential.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
     if (!result) return res.status(404).json({ error: "Credential not found" });
     return res.status(204).send();
   } catch (err) {

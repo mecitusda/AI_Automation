@@ -12,6 +12,12 @@ import type { WorkflowDetail } from "../api/workflow";
 import IfNode from "./IfNode";
 import DefaultNode from "./DefaultNode";
 import React, { useMemo } from "react";
+import {
+  READONLY_DEFAULT_PLUGIN_HANDLES,
+  READONLY_IF_HANDLES,
+  resolveDependsOnSourceHandle,
+  stepHasOutgoingErrorPort,
+} from "../utils/workflowGraphEdges";
 
 const nodeTypes = {
   ifNode: IfNode,
@@ -31,12 +37,33 @@ type Props = {
   steps: Step[];
   onNodeClick: (step: Step) => void;
   stepStates?: StepState[];
+  loopProgressByStep?: Record<string, { current: number; total: number }>;
+  /** Run detail: latest error text per stepId (execution view). */
+  failureHintByStepId?: Record<string, string>;
 };
 
 const nodeWidth = 180;
 const nodeHeight = 60;
 
-function getLayoutedElements(steps: Step[], stepStates?: StepState[]) {
+function selectPrimaryStepState(statesForStep: StepState[]): { primary?: StepState; status?: string } {
+  const hasSkipped = statesForStep.some((s) => s.status === "skipped");
+  const primary = statesForStep.length === 1
+    ? statesForStep[0]
+    : statesForStep.find((s) => s.status === "running" || s.status === "pending" || s.status === "retrying")
+      ?? statesForStep.find((s) => s.status === "failed")
+      ?? statesForStep.find((s) => s.status === "completed")
+      ?? statesForStep.find((s) => s.status === "skipped")
+      ?? statesForStep[0];
+  const status = (primary?.status === "completed" && hasSkipped) ? "partial" : primary?.status;
+  return { primary, status };
+}
+
+function getLayoutedElements(
+  steps: Step[],
+  stepStates?: StepState[],
+  loopProgressByStep?: Record<string, { current: number; total: number }>,
+  failureHintByStepId?: Record<string, string>
+) {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
 
@@ -80,17 +107,10 @@ function getLayoutedElements(steps: Step[], stepStates?: StepState[]) {
     const nodeWithPosition = dagreGraph.node(step.id);
 
     const statesForStep = stepStates?.filter(s => s.stepId === step.id) ?? [];
-    const hasCompleted = statesForStep.some(s => s.status === "completed");
-    const hasSkipped = statesForStep.some(s => s.status === "skipped");
-    const primaryState = statesForStep.length === 1
-      ? statesForStep[0]
-      : statesForStep.find(s => s.status === "running" || s.status === "pending" || s.status === "retrying")
-        ?? statesForStep.find(s => s.status === "failed")
-        ?? statesForStep.find(s => s.status === "skipped")
-        ?? statesForStep.find(s => s.status === "completed")
-        ?? statesForStep[0];
+    const { primary: primaryState, status } = selectPrimaryStepState(statesForStep);
     const iterations = statesForStep.map(s => s.iteration ?? 0).sort((a, b) => a - b);
-    const status = (primaryState?.status === "completed" && hasSkipped) ? "partial" : primaryState?.status;
+
+    const handles = step.type === "if" ? READONLY_IF_HANDLES : READONLY_DEFAULT_PLUGIN_HANDLES;
 
     return {
       id: step.id,
@@ -107,10 +127,14 @@ function getLayoutedElements(steps: Step[], stepStates?: StepState[]) {
         stepId: step.id,
         stepType: step.type,
         params: step.params,
+        handles,
         status,
         retryCount: primaryState?.retryCount ?? 0,
         iteration: primaryState?.iteration,
         iterations: iterations.length > 0 ? iterations : undefined,
+        progressCurrent: step.type === "foreach" ? loopProgressByStep?.[step.id]?.current : undefined,
+        progressTotal: step.type === "foreach" ? loopProgressByStep?.[step.id]?.total : undefined,
+        failureHint: failureHintByStepId?.[step.id] ?? "",
       },
     };
   });
@@ -127,16 +151,40 @@ function getLayoutedElements(steps: Step[], stepStates?: StepState[]) {
   });
 
   steps.forEach(step => {
-    step.dependsOn?.forEach(dep => {
+    step.dependsOn?.forEach((dep, depIdx) => {
       const sourceStep = steps.find(s => s.id === dep);
       const isIfBranch = sourceStep?.type === "if" && ifBranchTargets.has(step.id);
       if (isIfBranch) return;
+      const isErrorEdge = step.errorFrom === dep;
+      const isSwitchBranch =
+        step.branch != null &&
+        String(step.branch) !== "" &&
+        depIdx === 0 &&
+        sourceStep?.type === "switch";
+      const parentHasErrorPort = stepHasOutgoingErrorPort(steps, dep);
+      const sourceHandle = resolveDependsOnSourceHandle({
+        isErrorEdge,
+        isSwitchBranch,
+        branchHandle: isSwitchBranch ? String(step.branch) : undefined,
+        sourceStepType: sourceStep?.type,
+        parentHasErrorPort,
+      });
       edges.push({
-        id: `${dep}->${step.id}`,
+        id: `${dep}->${step.id}${isErrorEdge ? "-err" : ""}`,
         source: dep,
         target: step.id,
+        ...(sourceHandle ? { sourceHandle } : {}),
         animated: true,
-        style: { stroke: "#6b7280" }
+        ...(isErrorEdge
+          ? {
+              label: "error",
+              labelStyle: { fill: "#fecaca", fontWeight: 600 },
+              labelBgStyle: { fill: "#450a0a" },
+              labelBgPadding: [4, 2] as [number, number],
+              labelBgBorderRadius: 4,
+              style: { stroke: "#ef4444" }
+            }
+          : { style: { stroke: "#6b7280" } })
       });
     });
   });
@@ -180,12 +228,11 @@ function getLayoutedElements(steps: Step[], stepStates?: StepState[]) {
   return { nodes, edges };
 }
 
-function getBaseLayout(steps: Step[]) {
-  return getLayoutedElements(steps, undefined);
-}
-
-function WorkflowGraph({ steps, onNodeClick, stepStates }: Props) {
-  const baseLayout = useMemo(() => getBaseLayout(steps), [steps]);
+function WorkflowGraph({ steps, onNodeClick, stepStates, loopProgressByStep, failureHintByStepId }: Props) {
+  const baseLayout = useMemo(
+    () => getLayoutedElements(steps, undefined, undefined, failureHintByStepId),
+    [steps, failureHintByStepId]
+  );
 
   const nodes = useMemo(() => {
     if (!stepStates || stepStates.length === 0) return baseLayout.nodes;
@@ -197,25 +244,27 @@ function WorkflowGraph({ steps, onNodeClick, stepStates }: Props) {
     }
     return baseLayout.nodes.map(node => {
       const statesForStep = statesByStep.get(node.id) ?? [];
-      const primaryState = statesForStep.length === 1
-        ? statesForStep[0]
-        : statesForStep.find(s => s.status === "running" || s.status === "pending")
-          ?? statesForStep.find(s => s.status === "completed")
-          ?? statesForStep.find(s => s.status === "failed")
-          ?? statesForStep[0];
+      const { primary: primaryState, status } = selectPrimaryStepState(statesForStep);
       const iterations = statesForStep.map(s => s.iteration ?? 0).sort((a, b) => a - b);
       return {
         ...node,
         data: {
           ...node.data,
-          status: primaryState?.status,
+          status,
           retryCount: primaryState?.retryCount ?? 0,
           iteration: primaryState?.iteration,
           iterations: iterations.length > 0 ? iterations : undefined,
+          progressCurrent: (node.data as { stepType?: string }).stepType === "foreach"
+            ? loopProgressByStep?.[node.id]?.current
+            : undefined,
+          progressTotal: (node.data as { stepType?: string }).stepType === "foreach"
+            ? loopProgressByStep?.[node.id]?.total
+            : undefined,
+          failureHint: failureHintByStepId?.[node.id] ?? (node.data as { failureHint?: string }).failureHint ?? "",
         },
       };
     });
-  }, [baseLayout.nodes, stepStates]);
+  }, [baseLayout.nodes, stepStates, loopProgressByStep, failureHintByStepId]);
 
   const edges = baseLayout.edges;
 

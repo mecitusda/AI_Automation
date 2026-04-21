@@ -544,6 +544,15 @@
   background: #1f2b44;
 }
 
+.stepRow--clickable{
+  cursor: pointer;
+}
+
+.stepRow--clickable:focus-visible{
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
 .stepName{
   font-weight: 600;
   font-size: 14px;
@@ -789,4 +798,589 @@
   letter-spacing: 0.02em;
   color: #6b7280;
   white-space: nowrap;
+}
+
+/* ========== Run detail: execution graph (clickable nodes) ========== */
+.runExecutionGraph__hint {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.runExecutionGraph {
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: linear-gradient(165deg, var(--panel) 0%, var(--panel-2) 100%);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.runExecutionGraph .react-flow__node {
+  cursor: pointer;
+}
+
+.runExecutionGraph .react-flow__pane {
+  cursor: grab;
+}
+
+.runExecutionGraph .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+/* ========== Run detail: header replay (single place) ========== */
+.runDetailReplay {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+
+.runDetailReplay__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.runDetailReplay__select {
+  min-width: 160px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.runDetailReplay__select:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.runDetailReplay__btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.runDetailReplay__btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+}
+
+.runDetailReplay__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ========== Step inspector modal ========== */
+.runInspectorModal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  box-sizing: border-box;
+}
+
+/* Dim layer only — light blur so the graph stays readable */
+.runInspectorModal__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  cursor: pointer;
+  background: rgba(6, 10, 18, 0.52);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.runInspectorModal__panel {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  /* Stable frame: does not shrink/grow with short tab content */
+  width: clamp(32rem, 80rem, calc(100vw - 2rem));
+  height: clamp(31rem, 80vh, 86vh);
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(165deg, #151c2e 0%, #0e141f 48%, #0a0e16 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 32px 64px rgba(0, 0, 0, 0.45),
+    0 0 80px rgba(15, 23, 42, 0.35);
+  animation: runInspectorModalIn 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.runInspectorModal__panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 24px;
+  right: 24px;
+  height: 2px;
+  border-radius: 0 0 4px 4px;
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.55), transparent);
+  pointer-events: none;
+}
+
+@keyframes runInspectorModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.runInspectorModal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 28px 18px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.runInspectorModal__headerMain {
+  min-width: 0;
+  flex: 1;
+}
+
+.runInspectorModal__eyebrow {
+  margin: 0 0 6px;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.runInspectorModal__title {
+  margin: 0 0 10px;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+  word-break: break-all;
+}
+
+.runInspectorModal__subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.runInspectorModal__type {
+  font-size: 1.2rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.runInspectorModal__version {
+  font-size: 1.2rem;
+  color: var(--muted-2);
+  font-weight: 500;
+}
+
+.runInspectorModal__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.runInspectorModal__pill--completed {
+  background: rgba(34, 197, 94, 0.14);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.32);
+}
+
+/* Rose accent — distinct from error log cards (deeper red below) */
+.runInspectorModal__pill--failed {
+  background: rgba(244, 63, 94, 0.18);
+  color: #fecdd3;
+  border: 1px solid rgba(244, 63, 94, 0.42);
+}
+
+.runInspectorModal__pill--running,
+.runInspectorModal__pill--retrying {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fde68a;
+  border: 1px solid rgba(245, 158, 11, 0.32);
+}
+
+.runInspectorModal__pill--skipped,
+.runInspectorModal__pill--cancelled {
+  background: rgba(168, 85, 247, 0.1);
+  color: #e9d5ff;
+  border: 1px solid rgba(168, 85, 247, 0.28);
+}
+
+.runInspectorModal__pill--pending {
+  background: rgba(148, 163, 184, 0.1);
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.runInspectorModal__meta {
+  margin: 0;
+  font-size: 1.3rem;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.runInspectorModal__metaDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted-2);
+  opacity: 0.7;
+  display: inline-block;
+}
+
+.runInspectorModal__close {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.runInspectorModal__close:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fecaca;
+}
+
+.runInspectorModal__closeGlyph {
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 300;
+  margin-top: -2px;
+}
+
+/* Underline tab bar (not chunky buttons) */
+.runInspectorModal__tabBar {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: 0;
+  padding: 0;
+  width: 100%;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.12);
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.runInspectorModal__tab {
+  position: relative;
+  margin: 0;
+  padding: 14px 18px 12px;
+  flex: 1;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.3rem;
+  border-radius: 0;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.runInspectorModal__tab:hover {
+  color: var(--text);
+}
+
+.runInspectorModal__tab--active {
+  color: #e0f2fe;
+  border-bottom-color: #3b82f6;
+}
+
+.runInspectorModal__body {
+  padding: 24px 28px 28px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.runInspectorModal__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 56px 24px;
+  color: var(--muted);
+  flex: 1;
+  min-height: 12rem;
+}
+
+.runInspectorModal__spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--blue);
+  animation: runInspectorSpin 0.7s linear infinite;
+}
+
+@keyframes runInspectorSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.runInspectorModal__empty,
+.runInspectorModal__hint {
+  margin: 0;
+  font-size: 1.4rem;
+  color: var(--muted);
+  line-height: 1.55;
+  max-width: 42rem;
+}
+
+.runInspectorModal__tabPanel {
+  width: 100%;
+  max-width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.runInspectorModal__sectionLabel {
+  margin: 0 0 10px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+}
+
+.runInspectorModal__sectionLabel code {
+  font-size: 1.2rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #93c5fd;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.runInspectorModal__capture {
+  margin: 0 0 12px;
+  font-size: 1.2rem;
+  color: var(--muted-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.runInspectorModal__pre {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 16px 18px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: #060a12;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 1.3rem;
+  line-height: 1.55;
+  overflow: auto;
+  /* Room for JSON/logs even when payload is tiny; scroll if run is huge */
+  min-height: min(16rem, 32vh);
+  max-height: min(52vh, 26rem);
+  color: #cbd5e1;
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+}
+
+.runInspectorModal__pre--short {
+  min-height: min(10rem, 22vh);
+  max-height: min(36vh, 18rem);
+}
+
+.runInspectorModal__pre--error {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(45, 25, 28, 0.55);
+  color: #fecaca;
+  white-space: pre-wrap;
+}
+
+.runInspectorModal__logList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.runInspectorModal__logItem {
+  display: flex;
+  align-content: center;
+  margin-bottom: 10px;
+  padding: .6rem .7rem;
+  border-radius: 10px;
+  gap: .8rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-left-width: 3px;
+  border-left-color: #94a3b8;
+  background: linear-gradient(125deg, rgba(148, 163, 184, 0.12) 0%, rgba(71, 85, 105, 0.08) 100%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+/* system / info / default — calmer glow; stronger on hover */
+.runInspectorModal__logItem--default {
+  border-color: rgba(34, 211, 238, 0.3);
+  border-left-color: #06b6d4;
+  background: linear-gradient(125deg, rgba(34, 211, 238, 0.14) 0%, rgba(59, 130, 246, 0.1) 55%, rgba(99, 102, 241, 0.07) 100%);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.07) inset,
+    0 2px 14px rgba(14, 165, 233, 0.07);
+}
+
+.runInspectorModal__logItem--default:hover {
+  border-color: rgba(34, 211, 238, 0.48);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.14) inset,
+    0 4px 22px rgba(14, 165, 233, 0.14);
+}
+
+/* Deeper red stack — reads separate from rose FAILED pill */
+.runInspectorModal__logItem--error {
+  border-color: rgba(239, 68, 68, 0.48);
+  border-left-color: #ef4444;
+  background: linear-gradient(125deg, rgba(254, 202, 202, 0.18) 0%, rgba(239, 68, 68, 0.12) 45%, rgba(153, 27, 27, 0.12) 100%);
+  box-shadow:
+    0 0 0 1px rgba(248, 113, 113, 0.12) inset,
+    0 2px 16px rgba(220, 38, 38, 0.1);
+}
+
+.runInspectorModal__logItem--error:hover {
+  border-color: rgba(239, 68, 68, 0.62);
+  box-shadow:
+    0 0 0 1px rgba(248, 113, 113, 0.2) inset,
+    0 5px 26px rgba(220, 38, 38, 0.18);
+}
+
+.runInspectorModal__logItem--warning {
+  border-color: rgba(251, 191, 36, 0.38);
+  border-left-color: #eab308;
+  background: linear-gradient(125deg, rgba(253, 224, 71, 0.16) 0%, rgba(245, 158, 11, 0.11) 50%, rgba(217, 119, 6, 0.09) 100%);
+  box-shadow:
+    0 0 0 1px rgba(251, 191, 36, 0.09) inset,
+    0 2px 14px rgba(245, 158, 11, 0.09);
+}
+
+.runInspectorModal__logItem--warning:hover {
+  border-color: rgba(251, 191, 36, 0.55);
+  box-shadow:
+    0 0 0 1px rgba(251, 191, 36, 0.16) inset,
+    0 4px 22px rgba(245, 158, 11, 0.15);
+}
+
+.runInspectorModal__logRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+  font-size: 1.3rem;
+  color: var(--text);
+}
+
+.runInspectorModal__logLevel {
+  font-size: 1.2rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.runInspectorModal__logMsg {
+  flex: 1;
+  min-width: 140px;
+}
+
+.runInspectorModal__logTime {
+  font-size: 1.2rem;
+  color: var(--muted-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.runInspectorModal__logMeta {
+  margin-top: 8px;
+  font-size: 1.2rem;
+  color: var(--muted-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.runInspectorModal__logErr {
+  margin-top: 8px;
+  font-size: 1.3rem;
+  color: #fecaca;
+  line-height: 1.45;
+}
+
+.runInspectorModal__lastError {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.runInspectorModal__outputGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }

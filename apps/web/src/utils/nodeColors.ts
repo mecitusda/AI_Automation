@@ -23,38 +23,38 @@ export const getNodeColors = (status: string) => {
       };
     case "retrying":
       return {
-        border: "#f59e0b",
-        background: "#451a03",
-        glow: "0 0 12px #f59e0b88",
-        dot: "#fbbf24",
+        border: "#fb923c",
+        background: "#431407",
+        glow: "0 0 14px #ea580c99",
+        dot: "#fdba74",
       };
     case "pending":
       return {
-        border: "#6b7280",
-        background: "#1f2937",
+        border: "#94a3b8",
+        background: "#1e293b",
         glow: "none",
-        dot: "#9ca3af",
+        dot: "#cbd5e1",
       };
     case "skipped":
       return {
-        border: "#eab308",
-        background: "#422006",
+        border: "#a855f7",
+        background: "#3b0764",
         glow: "none",
-        dot: "#facc15",
+        dot: "#c4b5fd",
       };
     case "partial":
       return {
-        border: "#f59e0b",
-        background: "#451a03",
-        glow: "0 0 8px #f59e0b66",
-        dot: "#fbbf24",
+        border: "#14b8a6",
+        background: "#042f2e",
+        glow: "0 0 12px #14b8a680",
+        dot: "#5eead4",
       };
     case "cancelled":
       return {
-        border: "#374151",
-        background: "#111827",
+        border: "#78716c",
+        background: "#292524",
         glow: "none",
-        dot: "#4b5563",
+        dot: "#a8a29e",
       };
     default:
       return {

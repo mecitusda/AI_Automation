@@ -14,8 +14,7 @@
 /* Card */
 .modalCard {
   position: relative;
-  width: 500px;
-  max-width: 90%;
+  width: clamp(32rem, 80rem, calc(100vw - 2rem));
   background: #111827;
   border: 1px solid #374151;
   border-radius: 14px;

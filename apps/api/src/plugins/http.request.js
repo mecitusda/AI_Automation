@@ -36,6 +36,22 @@ function headersToPlainObject(headers) {
   return {};
 }
 
+/** Short snippet for logs/errors (avoid huge HTML/JSON bodies). */
+function summarizeResponseBody(data, max = 1200) {
+  if (data == null || data === "") return "";
+  if (typeof data === "string") {
+    const t = data.trim();
+    return t.length > max ? `${t.slice(0, max)}…` : t;
+  }
+  try {
+    const s = JSON.stringify(data);
+    return s.length > max ? `${s.slice(0, max)}…` : s;
+  } catch {
+    const t = String(data);
+    return t.length > max ? `${t.slice(0, max)}…` : t;
+  }
+}
+
 export default {
   type: "http",
   label: "HTTP Request",
@@ -78,15 +94,24 @@ export default {
     const url = String(params.url).trim();
 
     const startAt = Date.now();
-    const response = await axios({
-      url,
-      method,
-      data: body,
-      headers: headers && typeof headers === "object" ? headers : {},
-      params: query && Object.keys(query).length > 0 ? query : undefined,
-      signal,
-      validateStatus: () => true,
-    });
+    let response;
+    try {
+      response = await axios({
+        url,
+        method,
+        data: body,
+        headers: headers && typeof headers === "object" ? headers : {},
+        params: query && Object.keys(query).length > 0 ? query : undefined,
+        signal,
+        validateStatus: () => true,
+      });
+    } catch (err) {
+      const durationMs = Date.now() - startAt;
+      const code = err?.code ? String(err.code) : "";
+      const msg = err?.message || String(err);
+      const errorMessage = `HTTP request failed${code ? ` (${code})` : ""}: ${msg}`;
+      throw new Error(errorMessage);
+    }
     const durationMs = Date.now() - startAt;
 
     const responseHeaders = headersToPlainObject(response.headers);
@@ -97,10 +122,13 @@ export default {
     };
 
     if (response.status >= 400) {
+      const snippet = summarizeResponseBody(response.data);
+      const errorMessage =
+        `HTTP ${response.status} ${method} ${url}` + (snippet ? ` — ${snippet}` : "");
       return {
         success: false,
         output: out,
-        meta: { durationMs, status: response.status },
+        meta: { durationMs, status: response.status, errorMessage },
       };
     }
     return {

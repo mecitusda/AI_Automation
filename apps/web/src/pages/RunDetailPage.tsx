@@ -1,22 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { socket } from "../api/socket";
 import { replayRun, fetchRunDetail, type RunDetail } from "../api/run";
-import RunDebuggerPanel from "../components/RunDebuggerPanel";
+import { apiFetch } from "../api/client";
+import RunStepInspectorModal from "../components/RunStepInspectorModal";
 import "../styles/runs.css";
 import type { WorkflowDetail } from "../api/workflow";
 import WorkflowGraph from "../components/WorkflowGraph";
 import { fetchWorkflowDetail } from "../api/workflow";
+import { shouldShowSeparateLogError } from "../utils/runLogDisplay";
 
 const STATUS_LEGEND = [
   { status: "running",   color: "#3b82f6", label: "Running"   },
   { status: "completed", color: "#22c55e", label: "Completed" },
   { status: "failed",    color: "#ef4444", label: "Failed"   },
-  { status: "retrying",  color: "#f59e0b", label: "Retrying" },
-  { status: "pending",   color: "#6b7280", label: "Pending"  },
-  { status: "skipped",   color: "#eab308", label: "Skipped"   },
-  { status: "partial",   color: "#f59e0b", label: "Partial (some iterations skipped)" },
-  { status: "cancelled", color: "#4b5563", label: "Cancelled" },
+  { status: "retrying",  color: "#fb923c", label: "Retrying" },
+  { status: "pending",   color: "#94a3b8", label: "Pending"  },
+  { status: "skipped",   color: "#a855f7", label: "Skipped"   },
+  { status: "partial",   color: "#14b8a6", label: "Partial (some iterations skipped)" },
+  { status: "cancelled", color: "#78716c", label: "Cancelled" },
 ];
 
 type StepState = {
@@ -28,22 +30,27 @@ type StepState = {
 };
 
 type Log = {
-  stepId: string;
+  stepId?: string;
   message: string;
   level: "info" | "warning" | "error" | "retry" | "system";
   createdAt?: string;
+  error?: string;
+  attempt?: number;
+  status?: string;
 };
 
 type Run = {
   _id: string;
   status: string;
   durationMs?: number;
-  workflow: {
+  workflow?: {
     _id: string;
     name: string;
   };
   stepStates: StepState[];
   logs: Log[];
+  loopState?: Record<string, { index?: number; items?: unknown[] }>;
+  lastError?: { stepId?: string; message?: string; iteration?: number; attempt?: number };
 };
 
 type RunUpdatePayload = {
@@ -53,6 +60,7 @@ type RunUpdatePayload = {
   currentStepIndex?: number;
   finishedAt?: string;
   stepStates?: StepState[];
+  loopState?: Record<string, { index?: number; items?: unknown[] }>;
 };
 
 const STEP_COLORS = [
@@ -66,10 +74,11 @@ const STEP_COLORS = [
   "#ec4899",
 ];
 
-function getStepColor(stepId: string) {
+function getStepColor(stepId: string | undefined | null) {
+  const id = stepId ?? "";
   let hash = 0;
-  for (let i = 0; i < stepId.length; i++) {
-    hash = stepId.charCodeAt(i) + ((hash << 5) - hash);
+  for (let i = 0; i < id.length; i++) {
+    hash = id.charCodeAt(i) + ((hash << 5) - hash);
   }
   const index = Math.abs(hash) % STEP_COLORS.length;
   return STEP_COLORS[index];
@@ -89,22 +98,26 @@ export default function RunDetailPage() {
   const [cancelling, setCancelling] = useState(false);
   const [replayLoading, setReplayLoading] = useState(false);
   const [replayFromStepId, setReplayFromStepId] = useState<string>("");
+  const [logLevelFilter, setLogLevelFilter] = useState<"all" | Log["level"]>("all");
+  const [logSearch, setLogSearch] = useState("");
+  const [stepStatusFilter, setStepStatusFilter] = useState<"all" | StepState["status"]>("all");
+  const [inspectorStepId, setInspectorStepId] = useState<string | null>(null);
 
-  console.log("run", stepStates);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const detailRefreshTimerRef = useRef<number | null>(null);
 
   // initial fetch
   useEffect(() => {
     if (!runId) return;
 
-    fetch(`http://localhost:4000/runs/${runId}`)
-      .then((r) => r.json())
+    apiFetch<Run>(`/runs/${runId}`)
       .then((data: Run) => {
         setRun(data);
         setStepStates(data.stepStates ?? []);
         setLogs(data.logs ?? []);
         setLoading(false);
-      });
+      })
+      .catch(() => setLoading(false));
   }, [runId]);
 
   // fetch detailed run snapshot for debugger/output inspection
@@ -117,6 +130,19 @@ export default function RunDetailPage() {
         setRunDetail(null);
       });
   }, [runId]);
+
+  const scheduleRunDetailRefresh = (delayMs = 600) => {
+    if (!runId) return;
+    if (detailRefreshTimerRef.current != null) {
+      window.clearTimeout(detailRefreshTimerRef.current);
+    }
+    detailRefreshTimerRef.current = window.setTimeout(() => {
+      fetchRunDetail(runId)
+        .then((d) => setRunDetail(d))
+        .catch(() => {});
+      detailRefreshTimerRef.current = null;
+    }, delayMs);
+  };
   
   // socket listeners
   useEffect(() => {
@@ -132,6 +158,7 @@ export default function RunDetailPage() {
               ...prev,
               status: summary.status ?? prev.status,
               durationMs: summary.durationMs ?? prev.durationMs,
+              loopState: summary.loopState ?? prev.loopState,
             }
           : prev
       );
@@ -139,10 +166,12 @@ export default function RunDetailPage() {
       if (summary.stepStates) {
         setStepStates(summary.stepStates);
       }
+      scheduleRunDetailRefresh(summary.status === "running" ? 600 : 0);
     };
 
     const handleLog = (log: Log) => {
       setLogs((prev) => [...prev, log]);
+      scheduleRunDetailRefresh(1000);
     };
 
     const handleStepUpdate = (payload: { runId: string; stepId: string; iteration: number; status: string }) => {
@@ -151,11 +180,22 @@ export default function RunDetailPage() {
         const idx = prev.findIndex(
           (s) => s.stepId === payload.stepId && (s.iteration ?? 0) === payload.iteration
         );
-        if (idx < 0) return prev;
+        if (idx < 0) {
+          return [
+            ...prev,
+            {
+              stepId: payload.stepId,
+              iteration: payload.iteration,
+              retryCount: 0,
+              status: payload.status as StepState["status"],
+            }
+          ];
+        }
         const next = [...prev];
         next[idx] = { ...next[idx], status: payload.status as StepState["status"] };
         return next;
       });
+      scheduleRunDetailRefresh(800);
     };
 
     socket.on("run:update", handleUpdate);
@@ -167,6 +207,10 @@ export default function RunDetailPage() {
       socket.off("run:update", handleUpdate);
       socket.off("run:log", handleLog);
       socket.off("step:update", handleStepUpdate);
+      if (detailRefreshTimerRef.current != null) {
+        window.clearTimeout(detailRefreshTimerRef.current);
+        detailRefreshTimerRef.current = null;
+      }
     };
   }, [runId]);
 
@@ -181,6 +225,17 @@ export default function RunDetailPage() {
 
     fetchWorkflowDetail(run.workflow._id).then(setWorkflow);
   }, [run?.workflow?._id]);
+
+  const failureHintByStepId = useMemo(() => {
+    const fails = logs.filter((l) => l.level === "error" || l.status === "fail" || l.status === "timeout");
+    const rec: Record<string, string> = {};
+    for (const log of [...fails].reverse()) {
+      if (!log.stepId || rec[log.stepId]) continue;
+      const raw = (log.error && log.error.trim()) || log.message || "";
+      rec[log.stepId] = raw.length > 240 ? `${raw.slice(0, 240)}…` : raw;
+    }
+    return rec;
+  }, [logs]);
 
   const logKind = (level: Log["level"]) => {
     switch (level) {
@@ -204,7 +259,7 @@ export default function RunDetailPage() {
   try {
     setCancelling(true);
 
-    await fetch(`http://localhost:4000/runs/${runId}/cancel`, {
+    await apiFetch(`/runs/${runId}/cancel`, {
       method: "POST"
     });
 
@@ -232,14 +287,50 @@ export default function RunDetailPage() {
   };
   if (loading) return <div className="pageLayout">Loading...</div>;
   if (!run) return <div className="pageLayout">Run not found</div>;
+  const filteredStepStates = stepStates.filter((s) => stepStatusFilter === "all" ? true : s.status === stepStatusFilter);
+  const filteredLogs = logs.filter((l) => {
+    const levelOk = logLevelFilter === "all" ? true : l.level === logLevelFilter;
+    const text = `${l.stepId} ${l.message}`.toLowerCase();
+    const searchOk = logSearch.trim() ? text.includes(logSearch.toLowerCase()) : true;
+    return levelOk && searchOk;
+  });
+  const failureLogs = logs.filter((l) => l.level === "error" || l.status === "fail" || l.status === "timeout");
+  const latestFailureLog = [...failureLogs].sort((a, b) => {
+    const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return tb - ta;
+  })[0];
+  const failureByStep = new Map<string, Log>();
+  for (const log of [...failureLogs].reverse()) {
+    const sid = log.stepId;
+    if (!sid) continue;
+    if (!failureByStep.has(sid)) failureByStep.set(sid, log);
+  }
+  const loopProgressByStep = Object.fromEntries(
+    Object.entries(run.loopState || {}).map(([stepId, state]) => {
+      const total = Array.isArray(state?.items) ? state.items.length : 0;
+      const index = Number(state?.index ?? 0);
+      const current = total > 0 ? Math.min(index + 1, total) : 0;
+      return [stepId, { current, total }];
+    })
+  );
 
   return (
     <div className="pageLayout">
       <header className="pageHeader">
         <div>
-          <div className="title">Run: <span className="text-orange">{run.workflow.name}</span> #{run._id}</div>
+          <div className="title">Run: <span className="text-orange">{run.workflow?.name ?? "Unknown Workflow"}</span> #{run._id}</div>
           <div className="meta">Status: <strong className={`${run.status}`}>{run.status}</strong>  </div>
           <div className="meta">Duration: {run.durationMs ?? 0} ms</div>
+          {(run.status === "failed" || run.status === "cancelled") && (latestFailureLog || run.lastError?.message) && (
+            <div className="meta" style={{ marginTop: 6, color: "#f87171" }}>
+              Reason:{" "}
+              {(run.lastError?.message && run.lastError.message.trim()) ||
+                latestFailureLog?.error ||
+                latestFailureLog?.message ||
+                ""}
+            </div>
+          )}
         </div>
         {(run.status === "running" || run.status === "retrying") && (
     <button
@@ -251,20 +342,26 @@ export default function RunDetailPage() {
     </button>
   )}
         {canReplay && replaySteps.length > 0 && (
-          <div style={{ marginLeft: 16, display: "flex", alignItems: "center", gap: 8, fontSize: "1.2rem", fontWeight: "bold" }}>
-            <label>Replay from:</label>
+          <div className="runDetailReplay">
+            <span className="runDetailReplay__label">Replay from</span>
             <select
+              className="runDetailReplay__select"
               value={replayFromStepId}
               onChange={(e) => setReplayFromStepId(e.target.value)}
-              style={{ padding: "4px 8px" }}
+              aria-label="Choose step to replay from"
             >
-              <option value="">Select step</option>
+              <option value="">Select step…</option>
               {replaySteps.map((stepId) => (
                 <option key={stepId} value={stepId}>{stepId}</option>
               ))}
             </select>
-            <button onClick={handleReplay} disabled={replayLoading || !replayFromStepId}>
-              {replayLoading ? "Starting…" : "Replay from here"}
+            <button
+              type="button"
+              className="runDetailReplay__btn"
+              onClick={handleReplay}
+              disabled={replayLoading || !replayFromStepId}
+            >
+              {replayLoading ? "Starting…" : "Start replay"}
             </button>
           </div>
         )}
@@ -273,9 +370,34 @@ export default function RunDetailPage() {
       <main className="pageContent">
       <div className="pageSection" style={{ marginBottom: 16 }}>
         <div className="sectionTitle">Steps</div>
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ marginRight: 8 }}>Status filter:</label>
+          <select value={stepStatusFilter} onChange={(e) => setStepStatusFilter(e.target.value as any)}>
+            <option value="all">all</option>
+            <option value="pending">pending</option>
+            <option value="running">running</option>
+            <option value="retrying">retrying</option>
+            <option value="completed">completed</option>
+            <option value="failed">failed</option>
+            <option value="skipped">skipped</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </div>
         <div className="row">
-        {stepStates.map((step) => (
-          <div key={`${step.stepId}-${step.iteration ?? 0}`} className="stepRow">
+        {filteredStepStates.map((step) => (
+          <div
+            key={`${step.stepId}-${step.iteration ?? 0}`}
+            className="stepRow stepRow--clickable"
+            role="button"
+            tabIndex={0}
+            onClick={() => setInspectorStepId(step.stepId)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setInspectorStepId(step.stepId);
+              }
+            }}
+          >
             <div>
               <div className="stepName">
                 {step.stepId}
@@ -286,6 +408,11 @@ export default function RunDetailPage() {
               <div className="stepMeta">
                 {step.durationMs !== undefined && <span>{step.durationMs} ms</span>}
                 {step.retryCount > 0 && <span>Retry: {step.retryCount}</span>}
+                {step.status === "failed" && failureByStep.get(step.stepId) && (
+                  <span style={{ color: "#f87171" }}>
+                    {failureByStep.get(step.stepId)?.error || failureByStep.get(step.stepId)?.message}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -299,7 +426,7 @@ export default function RunDetailPage() {
       <div className="pageSection" style={{ marginBottom: 16 }}>
         <div className="sectionTitle">Run Timeline</div>
         <div className="timelinePanel" style={{ padding: "12px 0" }}>
-          {logs
+          {filteredLogs
             .filter((log) =>
               log.message?.startsWith("[RUN START]") ||
               log.message?.startsWith("[STEP START]") ||
@@ -318,8 +445,8 @@ export default function RunDetailPage() {
               else if (log.message?.startsWith("[STEP COMPLETE]")) label = "Step completed";
               else if (log.message?.startsWith("[STEP RETRY]") || log.message?.includes("Retry scheduled")) label = "Retry scheduled";
               else if (log.message?.startsWith("[RUN COMPLETE]") || (log.stepId === "system" && log.message?.toLowerCase().includes("completed"))) label = "Run completed";
-              else if (log.message?.startsWith("[STEP TIMEOUT]")) label = "Step timeout";
-              else if (log.message?.startsWith("[STEP FAIL]")) label = "Step failed";
+              else if (log.message?.startsWith("[STEP TIMEOUT]")) label = log.message;
+              else if (log.message?.startsWith("[STEP FAIL]")) label = log.message;
               return (
                 <div key={i} className="logRow" style={{ marginBottom: 8 }}>
                   <div className="logTime" style={{ minWidth: 80, fontSize: "1.2rem", fontWeight: "bold" }}>
@@ -327,8 +454,11 @@ export default function RunDetailPage() {
                   </div>
                   <div className={`logMsg ${logKind(log.level)}`} style={{ fontSize: "1.2rem", fontWeight: "bold" }}>{label}</div>
                   {log.stepId && log.stepId !== "system" && (
-                    <span style={{ marginLeft: 8, opacity: 0.8, color: getStepColor(log.level), fontSize: "1.2rem", fontWeight: "bold" }}>[{log.stepId}]</span>
+                    <span style={{ marginLeft: 8, opacity: 0.8, color: getStepColor(log.stepId), fontSize: "1.2rem", fontWeight: "bold" }}>[{log.stepId}]</span>
                   )}
+                  {shouldShowSeparateLogError(log.message, log.error) ? (
+                    <div style={{ marginLeft: 88, fontSize: "0.95rem", color: "#fca5a5", marginTop: 4 }}>{log.error}</div>
+                  ) : null}
                 </div>
               );
             })}
@@ -336,61 +466,66 @@ export default function RunDetailPage() {
       </div>
 
       {workflow && (
-        <div className="pageSection" style={{ marginBottom: 20, display: "flex", gap: 16 }}>
-          <div style={{ flex: 2 }}>
-            <div className="sectionTitle">Execution Graph</div>
-            <div className="graph-color-info">
-              {STATUS_LEGEND.map(({ status, color, label }) => (
-                <div key={status} className="graph-color-info__item">
-                  <span
-                    className="graph-color-info__dot"
-                    style={{
-                      background: color,
-                      boxShadow: ["running","completed","failed","retrying"].includes(status)
-                        ? `0 0 6px ${color}`
-                        : "none",
-                    }}
-                  />
-                  <span className="graph-color-info__label">{label}</span>
-                </div>
-              ))}
-            </div>
+        <div className="pageSection" style={{ marginBottom: 20 }}>
+          <div className="sectionTitle">Execution Graph</div>
+          <p className="runExecutionGraph__hint">
+            Click any node to open resolved inputs, outputs, and logs for that step.
+          </p>
+          <div className="graph-color-info">
+            {STATUS_LEGEND.map(({ status, color, label }) => (
+              <div key={status} className="graph-color-info__item">
+                <span
+                  className="graph-color-info__dot"
+                  style={{
+                    background: color,
+                    boxShadow: ["running","completed","failed","retrying","partial"].includes(status)
+                      ? `0 0 6px ${color}`
+                      : "none",
+                  }}
+                />
+                <span className="graph-color-info__label">{label}</span>
+              </div>
+            ))}
+          </div>
+          <div className="runExecutionGraph">
             <WorkflowGraph
               steps={workflow.steps}
               stepStates={stepStates}
-              onNodeClick={() => {}}
+              loopProgressByStep={loopProgressByStep}
+              failureHintByStepId={failureHintByStepId}
+              onNodeClick={(step) => setInspectorStepId(step.id)}
             />
           </div>
-          {runDetail && (
-            <div style={{ flex: 1, minWidth: 320, maxHeight: 520 }}>
-              <RunDebuggerPanel
-                detail={runDetail}
-                onReplayFromStep={
-                  canReplay && runId
-                    ? async (stepId: string) => {
-                        try {
-                          setReplayLoading(true);
-                          const result = await replayRun(runId, stepId);
-                          navigate(`/runs/${result.runId}`);
-                        } catch (err) {
-                          alert(err instanceof Error ? err.message : "Replay failed");
-                        } finally {
-                          setReplayLoading(false);
-                        }
-                      }
-                    : undefined
-                }
-              />
-            </div>
-          )}
         </div>
       )}
 
+      <RunStepInspectorModal
+        open={inspectorStepId != null}
+        onClose={() => setInspectorStepId(null)}
+        detail={runDetail}
+        stepId={inspectorStepId}
+      />
+
       <div className="pageSection">
         <div className="sectionTitle">Logs</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <select value={logLevelFilter} onChange={(e) => setLogLevelFilter(e.target.value as any)}>
+            <option value="all">all levels</option>
+            <option value="info">info</option>
+            <option value="warning">warning</option>
+            <option value="error">error</option>
+            <option value="retry">retry</option>
+            <option value="system">system</option>
+          </select>
+          <input
+            placeholder="Search logs..."
+            value={logSearch}
+            onChange={(e) => setLogSearch(e.target.value)}
+          />
+        </div>
 
         <div className="logPanel">
-          {logs.map((log, i) => (
+          {filteredLogs.map((log, i) => (
             <div key={i} className="logRow">
               <div className="logTime">
                 {log.createdAt
@@ -402,11 +537,14 @@ export default function RunDetailPage() {
                 className="logStep"
                 style={{ color: getStepColor(log.stepId) }}
               >
-                [{log.stepId}]
+                [{log.stepId ?? "system"}]
               </div>
 
               <div className={`logMsg ${logKind(log.level)}`}>
                 {log.message}
+                {shouldShowSeparateLogError(log.message, log.error) ? (
+                  <div style={{ marginTop: 4, fontSize: "0.9em", opacity: 0.95, color: "#fecaca" }}>{log.error}</div>
+                ) : null}
               </div>
             </div>
           ))}

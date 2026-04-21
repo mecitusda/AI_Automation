@@ -160,10 +160,32 @@ export default {
     }
 
     const usage = response.data?.usage;
-    const tokens = usage
-      ? { prompt: usage.prompt_tokens, completion: usage.completion_tokens, total: usage.total_tokens }
+    const meta = usage
+      ? { tokens: { prompt: usage.prompt_tokens, completion: usage.completion_tokens, total: usage.total_tokens } }
       : undefined;
 
-    return { success: true, output: { summary: text }, meta: tokens ? { tokens } : {} };
+    let output;
+    if (params?.format === "json") {
+      console.log("AI Response is JSON, parsing...", text);
+      const trimmed = text.trim();
+      if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+        console.log("[AI ERROR] Invalid JSON:", text);
+        throw new Error("AI did not return valid JSON");
+      }
+      try {
+        const parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== "object") {
+          throw new Error("Invalid JSON structure");
+        }
+        output = parsed;
+      } catch (err) {
+        console.log("[AI ERROR] Invalid JSON:", text);
+        throw new Error("AI did not return valid JSON");
+      }
+    } else {
+      output = { summary: text };
+    }
+
+    return { success: true, output, meta: meta ?? {} };
   },
 };

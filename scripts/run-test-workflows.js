@@ -4,6 +4,8 @@
  * Requires API running at API_URL (default http://localhost:4000).
  */
 
+import "./load-root-env.js";
+
 const API_URL = process.env.API_URL || "http://localhost:4000";
 
 const WORKFLOWS = {

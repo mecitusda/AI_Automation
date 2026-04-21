@@ -9,7 +9,10 @@ const stepSchema = new mongoose.Schema({
   default: {}
   },
   retry: { type: Number, default: 0 },
+  retryDelay: { type: Number },
   dependsOn: { type: [String], default: [] },
+  branch: { type: String },
+  errorFrom: { type: String },
   timeout: { type: Number, default: 0 },
   disabled: { type: Boolean, default: false }
 }, { _id: false });
@@ -39,12 +42,14 @@ const stepStateSchema = new mongoose.Schema({
   },
 
   startedAt: Date,
+  queuedAt: Date,
   finishedAt: Date,
   durationMs: Number
 
 }, { _id: false });
 
 const runSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
 
   workflowId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -95,11 +100,22 @@ const runSchema = new mongoose.Schema({
     default: {}
   },
 
+  /**
+   * Per step execution resolved params (redacted), keyed by `${stepId}::${iteration}`.
+   * Used for execution inspector (e.g. AI prompt after variable resolution).
+   */
+  stepInputs: {
+    type: Map,
+    of: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
+
   /** Set when execution is routed to an error-handler step; cleared after handler runs. */
   lastError: {
     stepId: String,
     message: String,
-    iteration: Number
+    iteration: Number,
+    attempt: Number
   },
 
   logs: [
@@ -126,7 +142,8 @@ const runSchema = new mongoose.Schema({
   workflowSnapshot: {
     steps: { type: [stepSchema], required: true },
     maxParallel: { type: Number, default: 5 },
-    version: { type: Number }
+    version: { type: Number },
+    onErrorStepId: { type: String }
   },
 
   createdAt: { type: Date, default: Date.now },

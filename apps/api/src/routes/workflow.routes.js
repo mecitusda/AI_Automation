@@ -6,6 +6,7 @@ import { registerCronWorkflow, stopCronWorkflow  } from "../config/scheduler.js"
 import { validateWorkflowPayload } from "../utils/validateWorkflow.js";
 import { workflowVersionDiff } from "../utils/workflowDiff.js";
 const router = express.Router();
+const ownedWorkflowQuery = (req, id) => ({ _id: id, userId: req.user.id });
 
 
 // GET
@@ -17,7 +18,7 @@ router.get("/:id/versions/diff", async (req, res) => {
     if (!Number.isInteger(fromV) || !Number.isInteger(toV)) {
       return res.status(400).json({ error: "Query from and to must be version numbers" });
     }
-    const wf = await Workflow.findById(req.params.id);
+    const wf = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
     if (!wf) return res.status(404).json({ error: "Workflow not found" });
 
     const fromSnap = wf.versions?.find((v) => v.version === fromV);
@@ -34,7 +35,7 @@ router.get("/:id/versions/diff", async (req, res) => {
 
 router.get("/:id/versions", async (req, res) => {
   try {
-    const wf = await Workflow.findById(req.params.id);
+    const wf = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
     if (!wf) return res.status(404).json({ error: "Workflow not found" });
 
     const versions = (wf.versions || [])
@@ -55,7 +56,7 @@ router.get("/:id/versions", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const wf = await Workflow.findById(req.params.id);
+    const wf = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
     if (!wf) return res.status(404).json({ error: "Not found" });
 
     res.json({
@@ -81,6 +82,7 @@ router.get("/:id/steps/:stepId/output-preview", async (req, res) => {
   try {
     const { id: workflowId, stepId } = req.params;
     const run = await Run.findOne({
+      userId: req.user.id,
       workflowId,
       status: { $in: ["completed", "failed"] }
     })
@@ -110,8 +112,8 @@ router.get("/:id/steps/:stepId/output-preview", async (req, res) => {
   }
 });
 
-router.get("/", async (_req, res) => {
-  const workflows = await Workflow.find().sort({ createdAt: -1 });
+router.get("/", async (req, res) => {
+  const workflows = await Workflow.find({ userId: req.user.id }).sort({ createdAt: -1 });
 
   res.json(
     workflows.map(w => ({
@@ -131,7 +133,7 @@ router.post("/:id/rollback/:version", async (req, res) => {
   try {
     const { id, version } = req.params;
     const targetVersion = Number(version);
-    const wf = await Workflow.findById(id);
+    const wf = await Workflow.findOne(ownedWorkflowQuery(req, id));
     if (!wf) return res.status(404).json({ error: "Workflow not found" });
 
     // versions init (legacy safety)
@@ -208,7 +210,7 @@ router.post("/:id/rollback/:version", async (req, res) => {
  */
 router.post("/:id/run", async (req, res) => {
   try {
-    const workflow = await Workflow.findById(req.params.id);
+    const workflow = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
 
     if (!workflow) {
       return res.status(404).json({ error: "Workflow not found" });
@@ -226,6 +228,7 @@ router.post("/:id/run", async (req, res) => {
     }
 
     const run = await Run.create({
+      userId: req.user.id,
       workflowId: workflow._id,
       workflowVersion,
       status: "queued"
@@ -327,6 +330,7 @@ router.post("/", async (req, res) => {
       maxParallel: validated.maxParallel,
       trigger: validated.trigger,
       enabled: validated.enabled,
+      userId: req.user.id,
 
       currentVersion: 1,
 
@@ -378,7 +382,7 @@ router.post("/", async (req, res) => {
 router.post("/:id/validate-variables", async (req, res) => {
   try {
     const { id } = req.params;
-    const wf = await Workflow.findById(id).lean();
+    const wf = await Workflow.findOne(ownedWorkflowQuery(req, id)).lean();
     if (!wf) return res.status(404).json({ error: "Workflow not found" });
 
     // Use provided steps if any, otherwise current workflow steps
@@ -495,7 +499,7 @@ router.post("/:id/validate-variables", async (req, res) => {
  */
 router.put("/:id", async (req, res) => {
   try {
-    const workflow = await Workflow.findById(req.params.id);
+    const workflow = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
     if (!workflow) {
       return res.status(404).json({ error: "Workflow not found" });
     }
@@ -589,7 +593,7 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    const workflow = await Workflow.findById(req.params.id);
+    const workflow = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
     if (!workflow) {
       return res.status(404).json({ error: "Workflow not found" });
     }

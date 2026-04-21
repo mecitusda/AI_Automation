@@ -1,31 +1,76 @@
 .nav {
-    display: flex;
-    gap: 1rem;
-    flex-direction: row;
-    justify-content: center;
-    padding: .8rem 3rem;
-    height: 5.2rem;
-    border-bottom: 1px solid #334155;
-    background-color: #33ff0081;
-    box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  gap: 12px;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 12px 20px;
+  min-height: 52px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(18, 24, 38, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
 }
 
-.nav a{
-    display: flex;
-    align-items: center;
-    font-size: 1.6rem;
-    color: #ffffff;
-    text-decoration: none;
-    font-weight: 500;
-    transition: all 0.3s ease;
-    &:hover{
-        color: #000000;
-    }
+.nav a {
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+  color: #c9d1d9;
+  text-decoration: none;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 10px;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
-.nav a.active{
-    color: #000000;
+.nav a:hover {
+  color: #e6edf3;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav a.active {
+  color: #e6edf3;
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.nav button {
+  font-size: 15px;
+  padding: 8px 16px;
+  border-radius: 10px;
+}
+
+/* Public shell: brand only (no redundant “Login” link — form has Sign in / Register) */
+.authHeader {
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(18, 24, 38, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+}
+
+.authHeader__inner {
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 14px 24px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.authHeader__brand {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #e6edf3;
+}
+
+.authHeader__tagline {
+  font-size: 13px;
+  color: #8b949e;
+  font-weight: 500;
 }

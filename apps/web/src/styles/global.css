@@ -25,6 +25,15 @@ body{
   position: relative;
 }
 
+/* Login/register: brand header + form area */
+.main--authShell .authHeader {
+  flex-shrink: 0;
+}
+.main--authShell .loginPage {
+  flex: 1;
+  min-height: 0;
+}
+
 .container{
   padding: 40px;
   max-width: 1300px;

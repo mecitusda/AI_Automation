@@ -7,10 +7,16 @@ import { evalCondition } from "../utils/condition.js";
 import { redis } from "../config/redis.js";
 import { publishStepExecution } from "./executionEngine.js";
 import { movePendingToRunning, moveRetryingToRunning } from "./stateEngine.js";
+import { logError, logInfo } from "../utils/logger.js";
+import { withRedisFallback } from "../utils/redisSafe.js";
+import { getRunRetryBudget, isBreakerOpen, recordStepFailure } from "../utils/retryGuard.js";
+import { incrMetric } from "../utils/metricsCounter.js";
+import { redactExecutionParams } from "../utils/redactExecutionParams.js";
 
 
 const READY_ZSET = "runs:ready";
 const GLOBAL_MAX = Number(process.env.GLOBAL_MAX_INFLIGHT || 10);
+const PROCESSED_MESSAGES_CAP = Number(process.env.PROCESSED_MESSAGES_CAP || 1000);
 const INF_KEY = "global:inflight";     
 const TOK_SET = "global:tokens";       
 const TOK_TTL_MS = 10_000;             
@@ -55,22 +61,38 @@ const RELEASE_LUA = `
 
 async function enqueueReadyRun(runId) {
   // NX: zaten varsa tekrar ekleme
-  await redis.zadd(READY_ZSET, "NX", Date.now(), runId);
+  await withRedisFallback(
+    "orchestrator.enqueue_ready_run",
+    async () => redis.zadd(READY_ZSET, "NX", Date.now(), runId),
+    null
+  );
 }
 
 async function dequeueReadyRun(runId) {
-  await redis.zrem(READY_ZSET, runId);
+  await withRedisFallback(
+    "orchestrator.dequeue_ready_run",
+    async () => redis.zrem(READY_ZSET, runId),
+    null
+  );
 }
 
 async function acquireGlobalSlot({ runId, stepId, executionId }) {
   const token = `${runId}:${stepId}:${executionId}`;
-  const ok = await redis.eval(ACQUIRE_LUA, 2, INF_KEY, TOK_SET, String(GLOBAL_MAX), token, String(TOK_TTL_MS));
+  const ok = await withRedisFallback(
+    "orchestrator.acquire_global_slot",
+    async () => redis.eval(ACQUIRE_LUA, 2, INF_KEY, TOK_SET, String(GLOBAL_MAX), token, String(TOK_TTL_MS)),
+    1
+  );
   return ok === 1 ? token : null;
 }
 
 async function releaseGlobalSlot(token) {
   if (!token) return;
-  const removed = await redis.eval(RELEASE_LUA, 2, INF_KEY, TOK_SET, token);
+  const removed = await withRedisFallback(
+    "orchestrator.release_global_slot",
+    async () => redis.eval(RELEASE_LUA, 2, INF_KEY, TOK_SET, token),
+    0
+  );
 
   // slot boşaldıysa (removed==1) bir kick gönder
   if (removed === 1) {
@@ -87,13 +109,13 @@ async function releaseGlobalSlot(token) {
 
 
 async function pumpReadyRuns({ io }) {
-  const inf = Number(await redis.get(INF_KEY) || 0);
+  const inf = Number(await withRedisFallback("orchestrator.get_inflight", async () => redis.get(INF_KEY), "0") || 0);
   const free = GLOBAL_MAX - inf;
   if (free <= 0) return;
 
   const batch = Math.min(free, 10);
 
-  const runIds = await redis.zrange(READY_ZSET, 0, batch - 1);
+  const runIds = await withRedisFallback("orchestrator.get_ready_runs", async () => redis.zrange(READY_ZSET, 0, batch - 1), []);
   if (!runIds.length) return;
 
   for (const runId of runIds) {
@@ -124,7 +146,8 @@ async function pumpReadyRuns({ io }) {
     }
 
     const hasPending = fresh.stepStates?.some(s => s.status === "pending");
-    if (!hasPending) {
+    const hasWorkerInflight = hasWorkerInflightStepStates(fresh.stepStates, fresh.workflowSnapshot);
+    if (!hasPending && !hasWorkerInflight) {
       await dequeueReadyRun(runId);
     }
   }
@@ -162,7 +185,8 @@ function emitRunUpdate(run, io) {
     finishedAt: run.finishedAt,
     durationMs: run.durationMs,
     stepStates: run.stepStates,
-    logs: run.logs
+    logs: run.logs,
+    loopState: run.loopState || {}
   };
 
   // 🔹 Detail page için
@@ -197,8 +221,81 @@ async function addRunLog(runId, logEntry, io) {
   emitRunLog(runId, logEntry, io);
 }
 
+async function persistStepExecutionInput(runId, stepId, iteration, executionId, resolvedParams) {
+  const key = `${stepId}::${iteration}`;
+  const redacted = redactExecutionParams(resolvedParams);
+  await Run.updateOne(
+    { _id: runId },
+    {
+      $set: {
+        [`stepInputs.${key}`]: {
+          executionId,
+          params: redacted,
+          startedAt: new Date().toISOString()
+        }
+      }
+    }
+  );
+}
+
 function toPlain(stepDoc) {
   return typeof stepDoc?.toObject === "function" ? stepDoc.toObject() : stepDoc;
+}
+
+/** Worker-queue steps only; foreach/if are orchestrator-internal and must not block ready-queue dequeue. */
+function hasWorkerInflightStepStates(stepStates, workflow) {
+  if (!stepStates?.length || !workflow?.steps?.length) return false;
+  return stepStates.some((s) => {
+    if (!["running", "retrying"].includes(s.status)) return false;
+    const meta = workflow.steps.find((wf) => toPlain(wf).id === s.stepId);
+    const typ = meta ? toPlain(meta).type : "";
+    if (typ === "foreach" || typ === "if") return false;
+    return true;
+  });
+}
+
+/** Plain steps for Run.workflowSnapshot (avoids losing nested fields when copying Workflow → Run). */
+function snapshotStepsPlain(steps) {
+  if (!Array.isArray(steps) || !steps.length) return [];
+  return steps.map((s) => toPlain(s));
+}
+
+function coerceForeachItems(rawItems) {
+  let items = rawItems;
+  if (Array.isArray(items)) return items;
+
+  if (typeof items === "string") {
+    try {
+      const parsed = JSON.parse(items);
+      if (Array.isArray(parsed)) return parsed;
+      items = parsed;
+    } catch {
+      // keep original
+    }
+  }
+
+  if (items && typeof items === "object") {
+    // Common wrappers from previous step outputs.
+    const candidates = [
+      items.output,
+      items.items,
+      items.payments,
+      items.data
+    ];
+    for (const c of candidates) {
+      if (Array.isArray(c)) return c;
+      if (typeof c === "string") {
+        try {
+          const parsed = JSON.parse(c);
+          if (Array.isArray(parsed)) return parsed;
+        } catch {
+          // ignore candidate
+        }
+      }
+    }
+  }
+
+  return items;
 }
 
 /** Run.loopState is a Mongoose Map; use .get() or fallback to bracket notation for plain objects. */
@@ -464,7 +561,14 @@ async function dispatchReadySteps({
   const workflow = run.workflowSnapshot;
   if (!workflow || !workflow.steps?.length) return;
 
-  const runningCount = run.stepStates.filter( s => ["running", "retrying"].includes(s.status) ).length;
+  // Control steps (e.g. foreach) are orchestrator-internal and should not consume
+  // worker parallel slots; counting them can deadlock low maxParallel workflows.
+  const runningCount = run.stepStates.filter((s) => {
+    if (!["running", "retrying"].includes(s.status)) return false;
+    const stepMeta = workflow.steps.find((wfStep) => wfStep.id === s.stepId);
+    const stepType = toPlain(stepMeta)?.type;
+    return stepType !== "foreach" && stepType !== "if";
+  }).length;
   const maxParallel = workflow.maxParallel ?? 5;
   const availableSlots = maxParallel - runningCount;
 
@@ -633,31 +737,10 @@ async function dispatchReadySteps({
       if (!loopState) {
 
         const context = buildContext(run);
-        items = resolveVariables(stepPlain.params?.items, context);
+        items = coerceForeachItems(resolveVariables(stepPlain.params?.items, context));
         if (!Array.isArray(items)) {
-          if (typeof items === "string") {
-            try {
-              const parsed = JSON.parse(items);
-              if (Array.isArray(parsed)) items = parsed;
-            } catch {
-              // ignore
-            }
-          }
-          if (!Array.isArray(items) && items && typeof items === "object" && typeof items.output !== "undefined") {
-            const inner = items.output;
-            if (Array.isArray(inner)) items = inner;
-            else if (typeof inner === "string") {
-              try {
-                const parsed = JSON.parse(inner);
-                if (Array.isArray(parsed)) items = parsed;
-              } catch {
-                // ignore
-              }
-            }
-          }
-          if (!Array.isArray(items)) {
-            throw new Error("foreach items must be array");
-          }
+          const type = items === null ? "null" : Array.isArray(items) ? "array" : typeof items;
+          throw new Error(`foreach items must be array (got ${type})`);
         }
 
         const initialLoopContext = {
@@ -936,6 +1019,27 @@ const depsOk = depsSatisfied(
             { stepId: "system", message: `[RUN] No steps to schedule; run finished`, createdAt: new Date(), level: "system" },
             io
           );
+          const doneAt = new Date();
+          const completeRes = await Run.updateOne(
+            { _id: runId, status: "running" },
+            {
+              $set: {
+                status: "completed",
+                finishedAt: doneAt,
+                durationMs: doneAt.getTime() - refreshed.createdAt.getTime()
+              }
+            }
+          );
+          if (completeRes.modifiedCount > 0) {
+            await dequeueReadyRun(runId);
+            const finalRun = await Run.findById(runId);
+            emitRunUpdate(finalRun, io);
+            await addRunLog(
+              runId,
+              { stepId: "system", message: "[RUN COMPLETE] Run completed successfully", createdAt: new Date(), level: "info" },
+              io
+            );
+          }
           return;
         }
         return dispatchReadySteps({ runId, channel, resolveVariables, io });
@@ -1004,6 +1108,8 @@ const depsOk = depsSatisfied(
       stepPlain.params ?? {},
       buildContext(run, stepIteration)
     );
+
+    await persistStepExecutionInput(runId, stepPlain.id, stepIteration, executionId, resolvedParams);
 
     await addRunLog(
       runId,
@@ -1086,6 +1192,20 @@ function isRunDone(workflow, run) {
     const states = run.stepStates.filter(x => x.stepId === s.id);
 
     if (!states.length) return false;
+
+    const errorPortHandlers = (workflow.steps || []).filter(
+      (h) => toPlain(h).errorFrom === s.id
+    );
+    if (errorPortHandlers.length > 0 && states.some((x) => x.status === "failed")) {
+      return errorPortHandlers.every((h) => {
+        const hid = toPlain(h).id;
+        const hs = run.stepStates.filter((x) => x.stepId === hid);
+        if (!hs.length) return false;
+        return hs.every((x) =>
+          ["completed", "skipped", "failed"].includes(x.status)
+        );
+      });
+    }
 
     const parentForeach = workflow.steps?.find(
       (wf) => wf.type === "foreach" && isStepInsideLoop(s.id, wf.id, workflow)
@@ -1357,13 +1477,95 @@ async function ensurePendingStepState({
           stepId,
           iteration,
           status: "pending",
-          retryCount: 0
+          retryCount: 0,
+          queuedAt: new Date()
         }
       }
     }
   );
 
   return res.modifiedCount === 1;
+}
+
+/**
+ * After process death, worker steps can stay running/retrying in Mongo with no step.result.
+ * Reset those (except orchestrator-internal foreach/if) to pending so dispatch can resume.
+ */
+async function normalizeOrphanWorkerStepsForRun(run, io) {
+  const wf = run.workflowSnapshot;
+  const states = run.stepStates || [];
+  if (!wf?.steps?.length || !states.length) return false;
+
+  let resetCount = 0;
+  const newStates = states.map((st) => {
+    const p = typeof st.toObject === "function" ? st.toObject() : { ...st };
+    if (!["running", "retrying"].includes(p.status)) return p;
+    const meta = wf.steps.find((s) => toPlain(s).id === p.stepId);
+    const typ = meta ? toPlain(meta).type : "";
+    if (typ === "foreach" || typ === "if") return p;
+    resetCount++;
+    return {
+      stepId: p.stepId,
+      iteration: p.iteration ?? 0,
+      retryCount: p.retryCount ?? 0,
+      status: "pending"
+    };
+  });
+
+  if (resetCount === 0) return false;
+
+  const runId = run._id.toString();
+  await Run.updateOne({ _id: run._id }, { $set: { stepStates: newStates } });
+  await addRunLog(
+    runId,
+    {
+      message: `[RECOVERY] ${resetCount} worker step(s) reset to pending after orchestrator restart`,
+      level: "system",
+      createdAt: new Date()
+    },
+    io
+  );
+  logInfo("orchestrator.crash_recovery.steps_reset", { runId, resetCount });
+  const fresh = await Run.findById(run._id);
+  if (fresh) emitRunUpdate(fresh, io);
+  return true;
+}
+
+async function reconcileRunsOnStartup({ io }) {
+  const staleRuns = await Run.find({
+    status: { $in: ["queued", "running"] }
+  }).select({ _id: 1, status: 1, workflowSnapshot: 1, stepStates: 1 }).limit(500);
+
+  for (const run of staleRuns) {
+    const runId = run._id.toString();
+    if (run.status === "queued") {
+      await channel.publish(
+        "automation.direct",
+        "run.start",
+        Buffer.from(JSON.stringify({ runId }))
+      );
+      continue;
+    }
+
+    await normalizeOrphanWorkerStepsForRun(run, io);
+
+    const latest = await Run.findById(runId).select({ _id: 1, status: 1, workflowSnapshot: 1, stepStates: 1 });
+    if (!latest || latest.status !== "running") continue;
+
+    const hasSchedulablePending = (latest.stepStates || []).some(
+      (s) => s.status === "pending" || s.status === "retrying"
+    );
+    if (hasSchedulablePending || (latest.workflowSnapshot?.steps?.length ?? 0) > 0) {
+      await enqueueReadyRun(runId);
+      emitRunUpdate(latest, io);
+    }
+  }
+
+  await channel.publish(
+    "automation.direct",
+    "dispatch.kick",
+    Buffer.from(JSON.stringify({ t: Date.now(), source: "startup-reconcile" }))
+  );
 }
 
 export async function startOrchestrator({ io }) {
@@ -1422,15 +1624,16 @@ export async function startOrchestrator({ io }) {
       v => v.version === run.workflowVersion
     );
 
+    const sourceSteps = version ? version.steps : workflowDoc.steps;
     const snapshot = version
       ? {
-          steps: version.steps,
+          steps: snapshotStepsPlain(sourceSteps),
           maxParallel: version.maxParallel ?? workflowDoc.maxParallel ?? 5,
           onErrorStepId: workflowDoc.onErrorStepId ?? null,
           version: run.workflowVersion
         }
       : {
-          steps: workflowDoc.steps,
+          steps: snapshotStepsPlain(sourceSteps),
           maxParallel: workflowDoc.maxParallel ?? 5,
           onErrorStepId: workflowDoc.onErrorStepId ?? null,
           version: run.workflowVersion
@@ -1521,7 +1724,7 @@ export async function startOrchestrator({ io }) {
     return channel.ack(msg);
 
   } catch (err) {
-    console.error("RUN START ERROR:", err);
+    logError("orchestrator.run_start.error", { message: err?.message || String(err) });
     channel.nack(msg, false, true);
   }
 });
@@ -1568,6 +1771,13 @@ export async function startOrchestrator({ io }) {
     if (idem.modifiedCount === 0) {
       await releaseGlobalSlot(globalToken);
       return channel.ack(msg);
+    }
+    // Keep idempotency list bounded to prevent unbounded run document growth.
+    if (PROCESSED_MESSAGES_CAP > 0) {
+      await Run.updateOne(
+        { _id: runId },
+        { $push: { processedMessages: { $each: [], $slice: -PROCESSED_MESSAGES_CAP } } }
+      );
     }
 
     const workflow = run.workflowSnapshot;
@@ -1647,6 +1857,7 @@ export async function startOrchestrator({ io }) {
    
      emitStepUpdate(runId, stepId, iteration, "completed", io);
      emitRunLog(runId, logEntry, io);
+     await incrMetric("step.success");
    
      const updatedRun = await Run.findById(runId);
      emitRunUpdate(updatedRun, io);
@@ -1714,6 +1925,7 @@ export async function startOrchestrator({ io }) {
        if (completeRes.modifiedCount === 0) {
          return channel.ack(msg);
        }
+       await incrMetric("run.completed");
      
        await dequeueReadyRun(runId);
      
@@ -1748,6 +1960,25 @@ export async function startOrchestrator({ io }) {
 
     /* ========== RETRY PATH ========== */
     if (nextRetry <= maxRetry) {
+      const latest = await Run.findById(runId).select({ stepStates: 1 }).lean();
+      const retryBudget = getRunRetryBudget();
+      const totalRetry = (latest?.stepStates || []).reduce(
+        (acc, s) => acc + (s.retryCount ?? 0),
+        0
+      );
+      const breakerOpen = await isBreakerOpen(step.type);
+      if (totalRetry >= retryBudget || breakerOpen) {
+        await addRunLog(
+          runId,
+          {
+            stepId,
+            message: `[RETRY BLOCKED] budget=${retryBudget} totalRetry=${totalRetry} breakerOpen=${breakerOpen}`,
+            createdAt: new Date(),
+            level: "warning"
+          },
+          io
+        );
+      } else {
       // Timeout failure log'u timeout consumer zaten basıyor olabilir.
       // Timeout değilse burada "Step failed" log bas.
       if (!isTimeout) {
@@ -1810,6 +2041,7 @@ export async function startOrchestrator({ io }) {
         },
         io
       );
+      await incrMetric("step.retry");
 
       await releaseGlobalSlot(globalToken);
 
@@ -1832,6 +2064,7 @@ export async function startOrchestrator({ io }) {
       );
 
       return channel.ack(msg);
+      }
     }
 
     /* ========== FINAL FAIL PATH (retry bitti) ========== */
@@ -1857,8 +2090,7 @@ export async function startOrchestrator({ io }) {
       level: "error",
       status: isTimeout ? "timeout" : "fail",
       durationMs,
-      attempt: output?.meta?.attempt,
-      error: errMsg
+      attempt: output?.meta?.attempt
     };
 
     // DB update: set step to failed first (run status may stay running if error port is used)
@@ -1894,17 +2126,57 @@ export async function startOrchestrator({ io }) {
 
     emitStepUpdate(runId, stepId, iteration, "failed", io);
     emitRunLog(runId, stepFailLog, io);
+    await incrMetric(isTimeout ? "step.timeout" : "step.failed");
+    await recordStepFailure(step.type);
 
-    const wfSnapshot = run.workflowSnapshot;
-    const errorHandlerSteps = wfSnapshot?.steps?.filter(s => s.errorFrom === stepId) ?? [];
-    const onErrorStepId = wfSnapshot?.onErrorStepId;
     const effectiveIteration = iteration ?? 0;
 
     // Always expose the failure context for variable resolution in error handlers.
-    const lastError = { stepId, message: error, iteration: effectiveIteration, attempt: output?.meta?.attempt };
+    const message =
+      typeof error === "string"
+        ? error
+        : error != null
+          ? JSON.stringify(error)
+          : "";
+    const lastError = {
+      stepId,
+      message,
+      iteration: effectiveIteration,
+      attempt: output?.meta?.attempt
+    };
     await Run.updateOne({ _id: runId }, { $set: { lastError } });
 
+    const afterFailLean = await Run.findById(runId).select("workflowSnapshot").lean();
+    const snapStepsArr = afterFailLean?.workflowSnapshot?.steps ?? [];
+    const wfSnapshot = afterFailLean?.workflowSnapshot;
+    const errorHandlerSteps = snapStepsArr.filter(
+      (s) => s && String(s.errorFrom) === String(stepId)
+    );
+    const onErrorStepId = wfSnapshot?.onErrorStepId;
+
     if (errorHandlerSteps.length > 0) {
+      const workflowForSkip = { steps: snapStepsArr };
+      const successBranchRoots = snapStepsArr.filter(
+        (s) =>
+          s &&
+          Array.isArray(s.dependsOn) &&
+          s.dependsOn.includes(stepId) &&
+          String(s.errorFrom) !== String(stepId)
+      );
+      for (const s of successBranchRoots) {
+        await ensurePendingStepState({
+          runId,
+          stepId: s.id,
+          iteration: effectiveIteration
+        });
+      }
+      let runForSkip = await Run.findById(runId);
+      for (const s of successBranchRoots) {
+        if (!runForSkip) break;
+        await skipBranch(workflowForSkip, runId, runForSkip, s.id, effectiveIteration, io);
+        runForSkip = await Run.findById(runId);
+      }
+
       const errStepIds = errorHandlerSteps.map(s => s.id);
 
       const runDoc = await Run.findById(runId);
@@ -1917,14 +2189,20 @@ export async function startOrchestrator({ io }) {
         stepId: id,
         iteration: effectiveIteration,
         status: "pending",
-        retryCount: 0
+        retryCount: 0,
+        queuedAt: new Date()
       }));
       if (toAdd.length > 0) {
         await Run.updateOne({ _id: runId }, { $push: { stepStates: { $each: toAdd } } });
       } else {
         await Run.updateOne(
           { _id: runId },
-          { $set: { "stepStates.$[s].status": "pending" } },
+          {
+            $set: {
+              "stepStates.$[s].status": "pending",
+              "stepStates.$[s].queuedAt": new Date()
+            }
+          },
           { arrayFilters: [{ "s.stepId": { $in: errStepIds }, "s.iteration": effectiveIteration }] }
         );
       }
@@ -1952,11 +2230,28 @@ export async function startOrchestrator({ io }) {
         );
 
         if (!existing) {
-          await Run.updateOne({ _id: runId }, { $push: { stepStates: { stepId: handlerId, iteration: effectiveIteration, status: "pending", retryCount: 0 } } });
+          await Run.updateOne({
+            _id: runId
+          }, {
+            $push: {
+              stepStates: {
+                stepId: handlerId,
+                iteration: effectiveIteration,
+                status: "pending",
+                retryCount: 0,
+                queuedAt: new Date()
+              }
+            }
+          });
         } else {
           await Run.updateOne(
             { _id: runId },
-            { $set: { "stepStates.$[s].status": "pending" } },
+            {
+              $set: {
+                "stepStates.$[s].status": "pending",
+                "stepStates.$[s].queuedAt": new Date()
+              }
+            },
             { arrayFilters: [{ "s.stepId": handlerId, "s.iteration": effectiveIteration }] }
           );
         }
@@ -2043,6 +2338,7 @@ export async function startOrchestrator({ io }) {
       }
     };
     await Run.updateOne({ _id: runId }, failRunUpdate);
+    await incrMetric("run.failed");
 
     await addRunLog(
       runId,
@@ -2061,7 +2357,7 @@ export async function startOrchestrator({ io }) {
 
     return channel.ack(msg);
   } catch (err) {
-    console.error("STEP RESULT ERROR:", err);
+    logError("orchestrator.step_result.error", { message: err?.message || String(err) });
     channel.nack(msg, false, true);
   }
 });
@@ -2128,6 +2424,7 @@ export async function startOrchestrator({ io }) {
     /* ================= REFRESH RUN ================= */
 
     const finalRun = await Run.findById(runId);
+    await incrMetric("run.cancelled");
 
     if (!finalRun) {
       channel.ack(msg);
@@ -2187,7 +2484,7 @@ export async function startOrchestrator({ io }) {
     channel.ack(msg);
 
   } catch (err) {
-    console.error("RUN CANCEL ERROR:", err);
+    logError("orchestrator.run_cancel.error", { message: err?.message || String(err) });
     channel.nack(msg, false, true);
   }
 });
@@ -2241,7 +2538,9 @@ export async function startOrchestrator({ io }) {
     emitRunUpdate(updatedRun, io);
 
     const previousOutput = getPreviousOutput(updatedRun, stepPlain, iteration);
-    const resolvedParams = resolveVariables(stepPlain.params ?? {}, buildContext(updatedRun));
+    const resolvedParams = resolveVariables(stepPlain.params ?? {}, buildContext(updatedRun, iteration));
+
+    await persistStepExecutionInput(runId, stepPlain.id, iteration, executionId, resolvedParams);
 
     await addRunLog(
       runId,
@@ -2293,7 +2592,7 @@ export async function startOrchestrator({ io }) {
     return channel.ack(msg);
 
   } catch (err) {
-    console.error("RETRY FIRE ERROR:", err);
+    logError("orchestrator.retry_fire.error", { message: err?.message || String(err) });
     channel.nack(msg, false, true);
   }
 });
@@ -2359,10 +2658,20 @@ export async function startOrchestrator({ io }) {
 
     // The worker will publish `step.result` after this cancellation.
     // Retry/fail decision is handled in the `step.result.q` consumer (single source of truth).
+    await addRunLog(
+      runId,
+      {
+        stepId,
+        message: `[STEP TIMEOUT SIGNAL] executionId=${executionId} iteration=${iteration}`,
+        createdAt: new Date(),
+        level: "warning"
+      },
+      io
+    );
     await releaseGlobalSlot(globalToken);
     return channel.ack(msg);
     } catch (err) {
-    console.error("TIMEOUT HANDLER ERROR:", err);
+    logError("orchestrator.timeout_handler.error", { message: err?.message || String(err) });
     channel.nack(msg, false, true);
     }
   });
@@ -2375,7 +2684,7 @@ export async function startOrchestrator({ io }) {
       await pumpReadyRuns({ io });
       channel.ack(msg);
     } catch (e) {
-      console.error("DISPATCH KICK ERROR:", e);
+      logError("orchestrator.dispatch_kick.error", { message: e?.message || String(e) });
       channel.nack(msg, false, true);
     }
   });
@@ -2400,13 +2709,15 @@ export async function startOrchestrator({ io }) {
 
       channel.ack(msg);
     } catch (err) {
-      console.error("WORKFLOW CREATED EVENT ERROR:", err);
+      logError("orchestrator.workflow_created_event.error", { message: err?.message || String(err) });
       channel.nack(msg, false, true);
     }
   });
   
+  await reconcileRunsOnStartup({ io });
+
   setInterval(() => {
-    pumpReadyRuns({ io }).catch((e) => console.error("PUMP TICK ERROR:", e));
+    pumpReadyRuns({ io }).catch((e) => logError("orchestrator.pump_tick.error", { message: e?.message || String(e) }));
   }, 1000);
-  console.log("Orchestrator running (enterprise mode)...");
+  logInfo("orchestrator.start", { message: "Orchestrator running (enterprise mode)" });
 }

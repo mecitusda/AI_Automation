@@ -3,9 +3,14 @@ import { healRun } from "../api/monitoring";
 import { useMonitoring } from "../hooks/useMonitoring";
 import { useStuck } from "../hooks/useStuck";
 
-export default function MonitoringCard() {
-  const data = useMonitoring();
-  const stuckRuns = useStuck();
+type Props = {
+  enabled?: boolean;
+};
+
+export default function MonitoringCard({ enabled = true }: Props) {
+  const data = useMonitoring(enabled);
+  const stuckRuns = useStuck(enabled);
+  if (!enabled) return null;
   if (!data) return null;
 
   const healthy =

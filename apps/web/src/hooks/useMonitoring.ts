@@ -2,10 +2,14 @@
 import { useEffect, useState } from "react";
 import { fetchMonitoring } from "../api/monitoring";
 import type { MonitoringSummary } from "../api/monitoring";
-export function useMonitoring() {
+export function useMonitoring(enabled = true) {
   const [data, setData] = useState<MonitoringSummary | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setData(null);
+      return;
+    }
     let mounted = true;
 
     async function load() {
@@ -13,7 +17,9 @@ export function useMonitoring() {
         const res = await fetchMonitoring();
         if (mounted) setData(res);
       } catch (err) {
-        console.error("Monitoring fetch error", err);
+        if ((err as Error)?.message !== "Forbidden") {
+          console.error("Monitoring fetch error", err);
+        }
       }
     }
 
@@ -24,7 +30,7 @@ export function useMonitoring() {
       mounted = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [enabled]);
 
   return data;
 }

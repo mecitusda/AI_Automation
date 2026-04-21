@@ -2,6 +2,7 @@
 import express from "express";
 import { redis } from "../config/redis.js";
 import { Run } from "../models/run.model.js";
+import { channel } from "../config/rabbit.js";
 
 const router = express.Router();
 

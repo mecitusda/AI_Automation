@@ -28,9 +28,10 @@ export function computeAncestors(steps, fromStepId) {
  * Ancestors get completed state and copied outputs; fromStepId and descendants get pending.
  * @param {object} sourceRun - Run document (lean) with workflowSnapshot, outputs, stepStates, triggerPayload
  * @param {string} fromStepId
+ * @param {number|undefined} iteration
  * @returns {object} plain object suitable for Run.create()
  */
-export function createReplayRun(sourceRun, fromStepId) {
+export function createReplayRun(sourceRun, fromStepId, iteration = undefined) {
   const steps = sourceRun.workflowSnapshot?.steps ?? [];
   const ancestors = computeAncestors(steps, fromStepId);
 
@@ -55,7 +56,9 @@ export function createReplayRun(sourceRun, fromStepId) {
         }
       }
       const srcStates = sourceRun.stepStates ?? [];
-      const state = srcStates.find((s) => s.stepId === stepId);
+      const state = iteration != null
+        ? srcStates.find((s) => s.stepId === stepId && (s.iteration ?? 0) === iteration)
+        : srcStates.find((s) => s.stepId === stepId);
       if (state) {
         stepStates.push({
           stepId: state.stepId,
@@ -63,6 +66,7 @@ export function createReplayRun(sourceRun, fromStepId) {
           executionId: state.executionId,
           retryCount: state.retryCount ?? 0,
           status: "completed",
+          queuedAt: state.queuedAt,
           startedAt: state.startedAt,
           finishedAt: state.finishedAt,
           durationMs: state.durationMs,
@@ -75,10 +79,12 @@ export function createReplayRun(sourceRun, fromStepId) {
         if (srcLoop) loopState.set(stepId, srcLoop);
       }
     } else {
+      const pendingIteration = (iteration != null && stepId === fromStepId) ? iteration : 0;
       stepStates.push({
         stepId,
-        iteration: 0,
+        iteration: pendingIteration,
         status: "pending",
+        queuedAt: new Date(),
       });
     }
   }
@@ -96,6 +102,7 @@ export function createReplayRun(sourceRun, fromStepId) {
     : { steps: [], maxParallel: 5, version: sourceRun.workflowVersion };
 
   return {
+    userId: sourceRun.userId,
     workflowId: sourceRun.workflowId,
     workflowVersion: sourceRun.workflowVersion,
     status: "queued",

@@ -174,6 +174,40 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
     outputSchemaByStep
   );
   const hasUpstreamSteps = steps.filter((s) => s.id !== step.id).length > 0;
+  const insertVariableIntoTarget = (target: EventTarget | null, path: string) => {
+    const token = `{{ ${path} }}`;
+    const el = target as HTMLInputElement | HTMLTextAreaElement | null;
+    if (!el) return false;
+    if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return false;
+    const start = (el.selectionStart ?? el.value.length);
+    const end = (el.selectionEnd ?? start);
+    const before = el.value.slice(0, start);
+    const after = el.value.slice(end);
+    const value = `${before}${token}${after}`;
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")?.set;
+    if (setter) setter.call(el, value);
+    else (el as any).value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    const next = start + token.length;
+    try {
+      el.focus();
+      el.setSelectionRange(next, next);
+    } catch {
+      // no-op
+    }
+    return true;
+  };
+  const handleVariableDrop = (e: React.DragEvent) => {
+    const path = e.dataTransfer.getData("application/x-variable");
+    if (!path) return;
+    e.preventDefault();
+    const handledByForm = Boolean(insertHandlerRef.current);
+    if (handledByForm) {
+      insertHandlerRef.current?.(path);
+      return;
+    }
+    insertVariableIntoTarget(e.target, path);
+  };
 
   return (
     <div className="modalOverlay">
@@ -182,7 +216,14 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
           ×
         </button>
         <div className="stepEditModal__layout">
-          <div className="stepEditModal__editor">
+          <div
+            className="stepEditModal__editor"
+            onDragOver={(e) => {
+              const hasVar = e.dataTransfer.types.includes("application/x-variable");
+              if (hasVar) e.preventDefault();
+            }}
+            onDrop={handleVariableDrop}
+          >
             <h2>Edit step: {step.id}</h2>
           <div className="modalSection" style={{ marginTop: -8 }}>
               <strong>Type:</strong> {step.type}

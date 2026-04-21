@@ -166,11 +166,39 @@ export default function DefaultNode({ id, data }: NodeProps) {
           )}
           <span style={{ fontSize: 14 }}>{icon}</span>
           <span>{displayLabel}</span>
+          {["foreach", "if", "switch"].includes(stepType) ? (
+            <span style={{ fontSize: 9, padding: "1px 4px", borderRadius: 4, background: "#1f2937", color: "#93c5fd" }}>
+              {stepType.toUpperCase()}
+            </span>
+          ) : null}
         </div>
         <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={summary}>
           {summary}
         </div>
-        {(data.iterations?.length ?? 0) > 0 && (
+        {String(data.status) === "failed" && (data as { failureHint?: string }).failureHint ? (
+          <div
+            style={{
+              fontSize: 10,
+              color: "#fca5a5",
+              marginTop: 4,
+              maxWidth: "100%",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              lineHeight: 1.25,
+            }}
+            title={String((data as { failureHint?: string }).failureHint)}
+          >
+            {(() => {
+              const h = String((data as { failureHint?: string }).failureHint ?? "");
+              return h.length > 140 ? `${h.slice(0, 140)}…` : h;
+            })()}
+          </div>
+        ) : null}
+        {typeof data.progressTotal === "number" && data.progressTotal > 0 ? (
+          <span style={{ position: "absolute", top: 4, right: 8, fontSize: 10, opacity: 0.9 }}>
+            {Math.min(Number(data.progressCurrent ?? 0), data.progressTotal)}/{data.progressTotal}
+          </span>
+        ) : (data.iterations?.length ?? 0) > 0 && (
           <span style={{ position: "absolute", top: 4, right: 8, fontSize: 10, opacity: 0.9 }} title={data.iterations.join(", ")}>
             {(data.iteration ?? 0) + 1}/{data.iterations.length}
           </span>

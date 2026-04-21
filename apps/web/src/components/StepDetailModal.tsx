@@ -38,7 +38,6 @@ export default function StepDetailModal({ step, onClose }: StepDetailModalProps)
           <pre>{JSON.stringify(step.params ?? {}, null, 2)}</pre>
         </div>
 
-        <button onClick={onClose}>Close</button>
       </div>
     </div>
   );

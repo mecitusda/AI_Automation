@@ -26,19 +26,24 @@ const versionSchema = new mongoose.Schema({
 }, { _id: false });
 
 const workflowSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
   name: { type: String, required: true },
   enabled: { type: Boolean, default: true },
 
   trigger: {
     type: {
       type: String,
-      enum: ["manual", "cron", "trigger.webhook"],
+      enum: ["manual", "cron", "trigger.webhook", "trigger.telegram"],
       default: "manual"
     },
     cron: { type: String },
     schedule: { type: String },
     timezone: { type: String },
-    webhookSecret: { type: String }
+    credentialId: { type: mongoose.Schema.Types.ObjectId, ref: "Credential" },
+    allowedUpdates: { type: [String], default: [] },
+    webhookSecret: { type: String },
+    signatureRequired: { type: Boolean, default: false },
+    signatureSecret: { type: String }
   },
 
   /**

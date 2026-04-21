@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchDashboard, type DashboardMetrics } from "../api/metrics";
+import { getCurrentUserRole } from "../api/client";
 import {
   BarChart,
   Bar,
@@ -17,11 +18,17 @@ const WINDOW_OPTS = [
 ];
 
 export default function MetricsDashboardPage() {
+  const isAdmin = getCurrentUserRole() === "admin";
   const [data, setData] = useState<DashboardMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [windowSec, setWindowSec] = useState(3600);
 
   useEffect(() => {
+    if (!isAdmin) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     fetchDashboard(windowSec)
@@ -35,9 +42,10 @@ export default function MetricsDashboardPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [windowSec]);
+  }, [windowSec, isAdmin]);
 
   if (loading && !data) return <div className="pageLayout"><div className="spinner" /></div>;
+  if (!isAdmin) return <div className="pageLayout">Metrics is available for admin users only.</div>;
   if (!data) return <div className="pageLayout">Failed to load metrics</div>;
 
   const runsPerWorkflowData = (data.runsPerWorkflow || []).map((w) => ({

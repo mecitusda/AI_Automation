@@ -16,10 +16,18 @@ import ReactFlow, {
 } from "reactflow";
 import dagre from "dagre";
 import "reactflow/dist/style.css";
-import { fetchWorkflowDetail, updateWorkflow } from "../api/workflow";
+import { fetchWorkflowDetail, updateWorkflow, startRun } from "../api/workflow";
 import { fetchRuns } from "../api/run";
 import type { WorkflowDetail, WorkflowTrigger } from "../api/workflow";
 import { validateWorkflow } from "../utils/validateWorkflow";
+import {
+  isErrorOutputEdge,
+  collectBranchWarnings,
+  resolveDependsOnSourceHandle,
+  stepHasOutgoingErrorPort,
+  READONLY_DEFAULT_PLUGIN_HANDLES,
+  READONLY_IF_HANDLES,
+} from "../utils/workflowGraphEdges";
 import { fetchPlugins } from "../api/plugins";
 import type { PluginInfo, PluginHandles } from "../api/plugins";
 import { getNodeTypesByCategory, nodeRegistry } from "../nodes";
@@ -177,6 +185,7 @@ function stepsToNodesAndEdges(steps: WorkflowDetail["steps"]): { nodes: Node[]; 
   dagre.layout(dagreGraph);
   const nodes: Node[] = steps.map((step) => {
     const pos = dagreGraph.node(step.id);
+    const handles = step.type === "if" ? READONLY_IF_HANDLES : READONLY_DEFAULT_PLUGIN_HANDLES;
     return {
       id: step.id,
       type: step.type === "if" ? "ifNode" : "defaultNode",
@@ -188,6 +197,7 @@ function stepsToNodesAndEdges(steps: WorkflowDetail["steps"]): { nodes: Node[]; 
         retry: step.retry ?? 0,
         timeout: step.timeout ?? 0,
         disabled: step.disabled ?? false,
+        handles,
       },
     };
   });
@@ -208,11 +218,22 @@ function stepsToNodesAndEdges(steps: WorkflowDetail["steps"]): { nodes: Node[]; 
       const isIfBranch =
         sourceStep?.type === "if" && ifBranchTargets.has(step.id);
       if (isIfBranch) return;
-      const isSwitchBranch = step.branch != null && step.branch !== "" && idx === 0;
+      const isSwitchBranch =
+        step.branch != null &&
+        String(step.branch) !== "" &&
+        idx === 0 &&
+        sourceStep?.type === "switch";
       const isErrorEdge = step.errorFrom === dep;
-      const sourceHandle = isErrorEdge ? "error" : isSwitchBranch ? step.branch : undefined;
+      const parentHasErrorPort = stepHasOutgoingErrorPort(steps, dep);
+      const sourceHandle = resolveDependsOnSourceHandle({
+        isErrorEdge,
+        isSwitchBranch,
+        branchHandle: isSwitchBranch ? String(step.branch) : undefined,
+        sourceStepType: sourceStep?.type,
+        parentHasErrorPort,
+      });
       edges.push({
-        id: `${dep}->${step.id}`,
+        id: `${dep}->${step.id}${isErrorEdge ? "-err" : ""}`,
         source: dep,
         target: step.id,
         ...(sourceHandle ? { sourceHandle } : {}),
@@ -321,6 +342,8 @@ export default function WorkflowEditPage() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [paletteSearch, setPaletteSearch] = useState("");
   const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const [testRunLoading, setTestRunLoading] = useState(false);
+  const [testRunMessage, setTestRunMessage] = useState("");
   const [quickAddMenu, setQuickAddMenu] = useState<{
     position: { x: number; y: number };
     sourceNodeId?: string;
@@ -396,8 +419,26 @@ export default function WorkflowEditPage() {
   }, [pluginCatalog, setNodes]);
 
   const onConnect = useCallback(
-    (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
-    [setEdges]
+    (connection: Connection) => {
+      if (!connection.source || !connection.target) return;
+      if (connection.source === connection.target) {
+        setError("A step cannot connect to itself.");
+        return;
+      }
+      const duplicate = edges.some(
+        (e) =>
+          e.source === connection.source &&
+          e.target === connection.target &&
+          (e.sourceHandle || "") === (connection.sourceHandle || "")
+      );
+      if (duplicate) {
+        setError("Duplicate connection is not allowed.");
+        return;
+      }
+      setError("");
+      setEdges((eds) => addEdge(connection, eds));
+    },
+    [setEdges, edges]
   );
 
   const existingIds = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes]);
@@ -684,13 +725,13 @@ export default function WorkflowEditPage() {
     return nodes.map((node) => {
       const d = node.data as { stepType?: string; params?: Record<string, unknown>; retry?: number; timeout?: number; disabled?: boolean };
       const incomingEdges = edges.filter((e) => e.target === node.id);
-      const dependsOn = incomingEdges.map((e) => e.source);
+      const dependsOn = [...new Set(incomingEdges.map((e) => e.source))];
       const sourceNodeFromSwitch = incomingEdges.find((e) => {
         const src = nodes.find((n) => n.id === e.source);
         const stepType = (src?.data as { stepType?: string })?.stepType;
         return stepType === "switch" && (e as { sourceHandle?: string }).sourceHandle;
       }) as (typeof incomingEdges)[0] & { sourceHandle?: string } | undefined;
-      const errorEdge = incomingEdges.find((e) => (e as { sourceHandle?: string }).sourceHandle === "error") as (typeof incomingEdges)[0] & { sourceHandle?: string } | undefined;
+      const errorEdge = incomingEdges.find((e) => isErrorOutputEdge(e)) as (typeof incomingEdges)[0] & { sourceHandle?: string } | undefined;
       const branch = sourceNodeFromSwitch?.sourceHandle ?? undefined;
       const errorFrom = errorEdge?.source ?? undefined;
       const stepType = d.stepType ?? "log";
@@ -737,7 +778,20 @@ export default function WorkflowEditPage() {
   const [lastStepErrors, setLastStepErrors] = useState<Record<string, Record<string, string>> | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
-  const validationResult = useMemo(() => validateWorkflow(buildSteps()), [nodes, edges]);
+  const validationResult = useMemo(() => {
+    const steps = buildSteps();
+    const base = validateWorkflow(steps);
+    const edgeList = edges.map((e) => ({
+      source: e.source,
+      target: e.target,
+      sourceHandle: (e as Edge & { sourceHandle?: string }).sourceHandle,
+    }));
+    const branchWarnings = collectBranchWarnings(steps, edgeList);
+    return {
+      ...base,
+      warnings: [...base.warnings, ...branchWarnings],
+    };
+  }, [buildSteps, edges]);
   const stepWarnings = validationResult.stepWarnings;
   const nodesWithWarnings = useMemo(
     () =>
@@ -814,6 +868,21 @@ export default function WorkflowEditPage() {
     setNodes(n);
     setEdges(e);
   }, [buildSteps, setNodes, setEdges]);
+
+  const handleTestRun = useCallback(async () => {
+    if (!id) return;
+    setTestRunLoading(true);
+    setTestRunMessage("");
+    try {
+      const result = await startRun(id);
+      setLastRunId(result.runId);
+      setTestRunMessage(`Test run queued: ${result.runId}`);
+    } catch (err) {
+      setTestRunMessage(err instanceof Error ? err.message : "Test run failed");
+    } finally {
+      setTestRunLoading(false);
+    }
+  }, [id]);
 
   if (loading) return <div className="pageLayout"><div className="spinner" /></div>;
   if (error && !workflow) return <div className="pageLayout">Error: {error}</div>;
@@ -970,9 +1039,13 @@ export default function WorkflowEditPage() {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button onClick={runAutoLayout}>Auto-layout</button>
+          <button onClick={handleTestRun} disabled={testRunLoading || !id}>
+            {testRunLoading ? "Testing…" : "Test run"}
+          </button>
           <button onClick={handleSaveWorkflow} disabled={saving}>
             {saving ? "Saving…" : "Save workflow"}
           </button>
+          {testRunMessage && <span style={{ fontSize: 12, color: "#60a5fa" }}>{testRunMessage}</span>}
           {savedAt && (
             <span style={{ fontSize: 12, color: "#22c55e" }} title={savedAt.toLocaleString()}>
               Saved {savedAt.toLocaleTimeString()}
