@@ -1,6 +1,6 @@
 import express from "express";
 import { Credential } from "../models/credential.model.js";
-import { encrypt } from "../utils/credentialCrypto.js";
+import { decrypt, encrypt } from "../utils/credentialCrypto.js";
 
 const router = express.Router();
 
@@ -33,7 +33,10 @@ router.post("/", async (req, res) => {
 
 router.get("/", async (_req, res) => {
   try {
-    const list = await Credential.find({ userId: _req.user.id }).select("name type createdAt").lean();
+    const typeFilter = typeof _req.query?.type === "string" ? _req.query.type.trim() : "";
+    const query = { userId: _req.user.id };
+    if (typeFilter) query.type = typeFilter;
+    const list = await Credential.find(query).select("name type createdAt").lean();
     return res.json(
       list.map((d) => ({
         id: d._id.toString(),
@@ -49,7 +52,46 @@ router.get("/", async (_req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const doc = await Credential.findOne({ _id: req.params.id, userId: req.user.id }).select("name type createdAt").lean();
+    const doc = await Credential.findOne({ _id: req.params.id, userId: req.user.id }).select("name type createdAt data").lean();
+    if (!doc) return res.status(404).json({ error: "Credential not found" });
+    let data = {};
+    try {
+      data = decrypt(doc.data);
+    } catch (err) {
+      return res.status(500).json({ error: err.message || "Failed to decrypt credential data" });
+    }
+    return res.json({
+      id: doc._id.toString(),
+      name: doc.name,
+      type: doc.type,
+      data,
+      createdAt: doc.createdAt
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Failed to get credential" });
+  }
+});
+
+router.put("/:id", async (req, res) => {
+  try {
+    const { name, type, data } = req.body || {};
+    if (!name || !type) {
+      return res.status(400).json({ error: "name and type are required" });
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return res.status(400).json({ error: "data must be a plain object" });
+    }
+    let encryptedData;
+    try {
+      encryptedData = encrypt(data);
+    } catch (err) {
+      return res.status(500).json({ error: err.message || "Encryption failed" });
+    }
+    const doc = await Credential.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: { name, type, data: encryptedData } },
+      { new: true }
+    ).select("name type createdAt");
     if (!doc) return res.status(404).json({ error: "Credential not found" });
     return res.json({
       id: doc._id.toString(),
@@ -58,7 +100,7 @@ router.get("/:id", async (req, res) => {
       createdAt: doc.createdAt
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || "Failed to get credential" });
+    return res.status(500).json({ error: err.message || "Failed to update credential" });
   }
 });
 

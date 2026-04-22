@@ -15,6 +15,7 @@ import type {
 import { getApiBaseUrl } from "../api/client";
 import WorkflowGraph from "../components/WorkflowGraph";
 import StepDetailModal from "../components/StepDetailModal";
+import { parseVariables } from "../utils/variableSystem";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -25,6 +26,10 @@ export default function WorkflowDetailPage() {
   const [loading, setLoading] = useState(true);
   const [selectedStep, setSelectedStep] = useState<WorkflowDetail["steps"][0] | null>(null);
   const [runLoading, setRunLoading] = useState(false);
+  const [runInputOpen, setRunInputOpen] = useState(false);
+  const [runInputJson, setRunInputJson] = useState("{\n\n}");
+  const [runInputError, setRunInputError] = useState("");
+  const [pendingRunVersion, setPendingRunVersion] = useState<number | undefined>(undefined);
   const [diffResult, setDiffResult] = useState<VersionDiffResponse | null>(null);
   const [diffFrom, setDiffFrom] = useState<number>(1);
   const [diffTo, setDiffTo] = useState<number>(1);
@@ -59,17 +64,95 @@ export default function WorkflowDetailPage() {
     setLoading(false)
   };
 
-  const handleStartRun = async (workflowVersion?: number) => {
+  const collectTriggerPaths = (obj: unknown, out: Set<string>) => {
+    if (obj == null) return;
+    if (typeof obj === "string") {
+      for (const path of parseVariables(obj)) {
+        if (path.startsWith("trigger.")) out.add(path);
+      }
+      return;
+    }
+    if (Array.isArray(obj)) {
+      for (const item of obj) collectTriggerPaths(item, out);
+      return;
+    }
+    if (typeof obj === "object") {
+      for (const value of Object.values(obj as Record<string, unknown>)) {
+        collectTriggerPaths(value, out);
+      }
+    }
+  };
+
+  const buildInputTemplate = (triggerPaths: string[]) => {
+    const root: Record<string, unknown> = {};
+    for (const fullPath of triggerPaths) {
+      const segments = fullPath.split(".").slice(1);
+      if (segments.length === 0) continue;
+      let cursor: Record<string, unknown> = root;
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const isLast = i === segments.length - 1;
+        if (isLast) {
+          if (cursor[seg] === undefined) cursor[seg] = null;
+          continue;
+        }
+        const next = cursor[seg];
+        if (!next || typeof next !== "object" || Array.isArray(next)) {
+          cursor[seg] = {};
+        }
+        cursor = cursor[seg] as Record<string, unknown>;
+      }
+    }
+    return root;
+  };
+
+  const startRunWithPayload = async (workflowVersion?: number, triggerPayload?: Record<string, unknown>) => {
     if (!id) return;
     setRunLoading(true);
     try {
-      const result = await startRun(id, workflowVersion != null ? { workflowVersion } : undefined);
+      const result = await startRun(id, {
+        ...(workflowVersion != null ? { workflowVersion } : {}),
+        ...(triggerPayload ? { triggerPayload } : {}),
+      });
       navigate(`/runs/${result.runId}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to start run");
     } finally {
       setRunLoading(false);
     }
+  };
+
+  const handleStartRun = async (workflowVersion?: number) => {
+    if (!workflow) return;
+    const triggerPaths = new Set<string>();
+    for (const step of workflow.steps) {
+      collectTriggerPaths(step.params ?? {}, triggerPaths);
+    }
+    if (triggerPaths.size === 0) {
+      return startRunWithPayload(workflowVersion);
+    }
+    const template = buildInputTemplate(Array.from(triggerPaths).sort((a, b) => a.localeCompare(b)));
+    setRunInputJson(JSON.stringify(template, null, 2));
+    setRunInputError("");
+    setPendingRunVersion(workflowVersion);
+    setRunInputOpen(true);
+  };
+
+  const handleConfirmRunWithInput = async () => {
+    let parsed: Record<string, unknown>;
+    try {
+      const value = JSON.parse(runInputJson);
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        setRunInputError("Run input must be a JSON object");
+        return;
+      }
+      parsed = value as Record<string, unknown>;
+    } catch {
+      setRunInputError("Run input is not valid JSON");
+      return;
+    }
+    setRunInputOpen(false);
+    await startRunWithPayload(pendingRunVersion, parsed);
   };
 
   const handleShowDiff = async () => {
@@ -88,6 +171,38 @@ export default function WorkflowDetailPage() {
 
   return (
     <div className="pageLayout">
+      {runInputOpen && (
+        <div className="modalOverlay" onClick={() => setRunInputOpen(false)}>
+          <div className="modalCard" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760 }}>
+            <h2 style={{ marginTop: 0 }}>Run input required</h2>
+            <p className="subtle" style={{ marginBottom: 10 }}>
+              This workflow uses <code>trigger.*</code> variables. Provide trigger payload before starting run.
+            </p>
+            <textarea
+              value={runInputJson}
+              onChange={(e) => setRunInputJson(e.target.value)}
+              rows={12}
+              spellCheck={false}
+              style={{
+                width: "100%",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#0f172a",
+                borderRadius: 8,
+                padding: 10,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              }}
+            />
+            {runInputError ? <div className="credentialsError">{runInputError}</div> : null}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+              <button type="button" onClick={() => setRunInputOpen(false)}>Cancel</button>
+              <button type="button" onClick={handleConfirmRunWithInput} disabled={runLoading}>
+                {runLoading ? "Starting…" : "Start run"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {selectedStep && (
   <StepDetailModal
     step={selectedStep}

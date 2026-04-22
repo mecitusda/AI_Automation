@@ -1,4 +1,17 @@
 import axios from "axios";
+import { XMLBuilder, XMLParser } from "fast-xml-parser";
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  trimValues: true,
+});
+
+const xmlBuilder = new XMLBuilder({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  format: false,
+});
 
 function parseMaybeJson(val, fallback) {
   if (val == null) return fallback;
@@ -24,6 +37,86 @@ function parseJsonOrThrow(val) {
     return JSON.parse(val);
   } catch {
     throw new Error("Invalid JSON in HTTP Request body");
+  }
+}
+
+function parseXmlOrThrow(val) {
+  if (val == null) return undefined;
+  if (typeof val === "string") {
+    const t = val.trim();
+    if (!t) return undefined;
+    xmlParser.parse(t); // validate
+    return val;
+  }
+  if (typeof val === "object") {
+    if (Array.isArray(val)) throw new Error("Invalid XML body: array root is not supported");
+    const hasSingleRoot = Object.keys(val).length === 1;
+    const payload = hasSingleRoot ? val : { root: val };
+    return xmlBuilder.build(payload);
+  }
+  throw new Error("Invalid XML body");
+}
+
+function parseRequestBody(val, mode) {
+  const bodyMode = String(mode || "json").toLowerCase();
+  if (bodyMode === "raw") return val;
+  if (bodyMode === "xml") return parseXmlOrThrow(val);
+  if (bodyMode === "text") {
+    if (val == null) return "";
+    return typeof val === "string" ? val : JSON.stringify(val);
+  }
+  return parseJsonOrThrow(val);
+}
+
+function parseResponseData(data, headers, mode) {
+  const parseMode = String(mode || "auto").toLowerCase();
+  if (parseMode === "raw") return data;
+  if (parseMode === "xml") {
+    if (data == null) return data;
+    if (typeof data !== "string") return data;
+    const t = data.trim();
+    if (!t) return null;
+    return xmlParser.parse(t);
+  }
+  if (parseMode === "text") {
+    if (typeof data === "string") return data;
+    try {
+      return JSON.stringify(data);
+    } catch {
+      return String(data ?? "");
+    }
+  }
+  if (parseMode === "json") {
+    if (data == null) return data;
+    if (typeof data === "object") return data;
+    if (typeof data === "string") {
+      const t = data.trim();
+      if (!t) return null;
+      return JSON.parse(data);
+    }
+    return data;
+  }
+
+  // auto
+  if (typeof data === "object" || data == null) return data;
+  if (typeof data !== "string") return data;
+  const contentType = String(headers?.["content-type"] || headers?.["Content-Type"] || "").toLowerCase();
+  const trimmed = data.trim();
+  const maybeXml = contentType.includes("xml") || trimmed.startsWith("<?xml") || trimmed.startsWith("<");
+  if (maybeXml) {
+    try {
+      return xmlParser.parse(data);
+    } catch {
+      return data;
+    }
+  }
+
+  const maybeJson = contentType.includes("application/json") || trimmed.startsWith("{") || trimmed.startsWith("[");
+  if (!maybeJson) return data;
+  try {
+    return JSON.parse(data);
+  } catch {
+    return data;
   }
 }
 
@@ -74,6 +167,31 @@ export default {
     { key: "headers", type: "json", label: "Headers", placeholder: '{"Content-Type": "application/json"}' },
     { key: "query", type: "json", label: "Query params", placeholder: "{}" },
     { key: "body", type: "json", label: "Body", placeholder: "{}" },
+    {
+      key: "bodyParseMode",
+      type: "select",
+      label: "Body Parse",
+      default: "json",
+      options: [
+        { value: "json", label: "JSON" },
+        { value: "xml", label: "XML" },
+        { value: "text", label: "Text" },
+        { value: "raw", label: "Raw" },
+      ],
+    },
+    {
+      key: "responseParseMode",
+      type: "select",
+      label: "Response Parse",
+      default: "auto",
+      options: [
+        { value: "auto", label: "Auto" },
+        { value: "json", label: "JSON" },
+        { value: "xml", label: "XML" },
+        { value: "text", label: "Text" },
+        { value: "raw", label: "Raw" },
+      ],
+    },
   ],
   output: {
     type: "object",
@@ -90,7 +208,7 @@ export default {
     const method = (params.method || "GET").toUpperCase();
     const headers = parseMaybeJson(params.headers, {});
     const query = parseMaybeJson(params.query, {});
-    const body = method !== "GET" ? parseJsonOrThrow(params.body) : undefined;
+    const body = method !== "GET" ? parseRequestBody(params.body, params.bodyParseMode) : undefined;
     const url = String(params.url).trim();
 
     const startAt = Date.now();
@@ -115,9 +233,10 @@ export default {
     const durationMs = Date.now() - startAt;
 
     const responseHeaders = headersToPlainObject(response.headers);
+    const parsedData = parseResponseData(response.data, responseHeaders, params.responseParseMode);
     const out = {
       status: response.status,
-      data: response.data,
+      data: parsedData,
       headers: responseHeaders,
     };
 

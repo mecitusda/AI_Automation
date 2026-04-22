@@ -218,6 +218,7 @@ router.post("/:id/run", async (req, res) => {
 
     let workflowVersion = workflow.currentVersion;
     const bodyVersion = req.body?.workflowVersion;
+    const triggerPayloadRaw = req.body?.triggerPayload ?? req.body?.input;
     if (bodyVersion != null && bodyVersion !== "") {
       const v = Number(bodyVersion);
       const hasVersion = workflow.versions?.some((ver) => ver.version === v) || v === workflow.currentVersion;
@@ -226,12 +227,19 @@ router.post("/:id/run", async (req, res) => {
       }
       workflowVersion = v;
     }
+    if (
+      triggerPayloadRaw != null &&
+      (typeof triggerPayloadRaw !== "object" || Array.isArray(triggerPayloadRaw))
+    ) {
+      return res.status(400).json({ error: "triggerPayload must be an object" });
+    }
 
     const run = await Run.create({
       userId: req.user.id,
       workflowId: workflow._id,
       workflowVersion,
-      status: "queued"
+      status: "queued",
+      triggerPayload: triggerPayloadRaw ?? undefined
     });
 
     // RabbitMQ'ya mesaj atıyoruz

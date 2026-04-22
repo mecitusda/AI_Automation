@@ -8,6 +8,7 @@ import WorkflowDetailPage from "./pages/WorkflowDetailPage"
 import WorkflowEditPage from "./pages/WorkflowEditPage"
 import TemplatesPage from "./pages/TemplatesPage"
 import MetricsDashboardPage from "./pages/MetricsDashboardPage"
+import CredentialsPage from "./pages/CredentialsPage"
 import { RunDataProvider } from "./contexts/RunDataContext"
 import LoginPage from "./pages/LoginPage"
 import { clearAccessToken, getAccessToken, getCurrentUserRole } from "./api/client"
@@ -21,6 +22,7 @@ function RequireAuth({ isAuthed, children }: { isAuthed: boolean; children: Reac
 
 export default function App() {
   const pathname = useLocation().pathname;
+  const isWorkflowEditRoute = /^\/workflows\/[^/]+\/edit$/.test(pathname);
   const isAuthed = Boolean(getAccessToken());
   const isAdmin = getCurrentUserRole() === "admin";
   useEffect(() => {
@@ -35,25 +37,57 @@ export default function App() {
     <RunDataProvider>
     <div className={`main${isAuthed ? "" : " main--authShell"}`}>
       {isAuthed ? (
-      <nav className="nav">
-        <Link to="/" className={pathname === "/" ? "active" : ""}>Runs</Link>
-        <Link to="/workflows" className={pathname === "/workflows" ? "active" : ""}>Workflows</Link>
-        {isAdmin ? (
-        <Link to="/metrics" className={pathname === "/metrics" ? "active" : ""}>Metrics</Link>
-        ) : null}
-        <Link to="/templates" className={pathname === "/templates" ? "active" : ""}>Templates</Link>
-        <button
-          type="button"
-          onClick={() => {
-            clearAccessToken();
-            disconnectSocket();
-            window.location.href = "/login";
-          }}
-          style={{ marginLeft: "auto" }}
-        >
-          Logout
-        </button>
-      </nav>
+      <div className="appShell">
+        <aside className="nav">
+          <div className="nav__top">
+            <div className="nav__brand">AI Automation</div>
+            <div className="nav__links">
+              <Link to="/" className={pathname === "/" ? "active" : ""}>Runs</Link>
+              <Link to="/workflows" className={pathname.startsWith("/workflows") ? "active" : ""}>Workflows</Link>
+              <Link to="/templates" className={pathname === "/templates" ? "active" : ""}>Templates</Link>
+              <Link to="/credentials" className={pathname === "/credentials" ? "active" : ""}>Credentials</Link>
+              {isAdmin ? (
+              <Link to="/metrics" className={pathname === "/metrics" ? "active" : ""}>Metrics</Link>
+              ) : null}
+                
+            </div>
+          </div>
+              
+          
+          <button
+            type="button"
+            className="nav__logout"
+            onClick={() => {
+              clearAccessToken();
+              disconnectSocket();
+              window.location.href = "/login";
+            }}
+          >
+            Logout
+          </button>
+        </aside>
+        <div className={`appShell__content${isWorkflowEditRoute ? " appShell__content--edit" : ""}`}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/" element={<RequireAuth isAuthed={isAuthed}><RunsPage /></RequireAuth>} />
+            <Route
+              path="/metrics"
+              element={
+                <RequireAuth isAuthed={isAuthed}>
+                  {isAdmin ? <MetricsDashboardPage /> : <Navigate to="/" replace />}
+                </RequireAuth>
+              }
+            />
+            <Route path="/runs/:id" element={<RequireAuth isAuthed={isAuthed}><RunDetailPage /></RequireAuth>} />
+            <Route path="/workflows" element={<RequireAuth isAuthed={isAuthed}><WorkflowsPage /></RequireAuth>} />
+            <Route path="/workflows/:id" element={<RequireAuth isAuthed={isAuthed}><WorkflowDetailPage /></RequireAuth>} />
+            <Route path="/workflows/:id/edit" element={<RequireAuth isAuthed={isAuthed}><WorkflowEditPage /></RequireAuth>} />
+            <Route path="/templates" element={<RequireAuth isAuthed={isAuthed}><TemplatesPage /></RequireAuth>} />
+            <Route path="/credentials" element={<RequireAuth isAuthed={isAuthed}><CredentialsPage /></RequireAuth>} />
+            <Route path="*" element={<Navigate to={isAuthed ? "/" : "/login"} replace />} />
+          </Routes>
+        </div>
+      </div>
       ) : (
       <header className="authHeader" role="banner">
         <div className="authHeader__inner">
@@ -62,24 +96,12 @@ export default function App() {
         </div>
       </header>
       )}
+      {!isAuthed ? (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={<RequireAuth isAuthed={isAuthed}><RunsPage /></RequireAuth>} />
-        <Route
-          path="/metrics"
-          element={
-            <RequireAuth isAuthed={isAuthed}>
-              {isAdmin ? <MetricsDashboardPage /> : <Navigate to="/" replace />}
-            </RequireAuth>
-          }
-        />
-        <Route path="/runs/:id" element={<RequireAuth isAuthed={isAuthed}><RunDetailPage /></RequireAuth>} />
-        <Route path="/workflows" element={<RequireAuth isAuthed={isAuthed}><WorkflowsPage /></RequireAuth>} />
-        <Route path="/workflows/:id" element={<RequireAuth isAuthed={isAuthed}><WorkflowDetailPage /></RequireAuth>} />
-        <Route path="/workflows/:id/edit" element={<RequireAuth isAuthed={isAuthed}><WorkflowEditPage /></RequireAuth>} />
-        <Route path="/templates" element={<RequireAuth isAuthed={isAuthed}><TemplatesPage /></RequireAuth>} />
-        <Route path="*" element={<Navigate to={isAuthed ? "/" : "/login"} replace />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      ) : null}
     </div>
     </RunDataProvider>
   )

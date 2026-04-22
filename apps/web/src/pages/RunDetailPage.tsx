@@ -370,8 +370,8 @@ export default function RunDetailPage() {
       <main className="pageContent">
       <div className="pageSection" style={{ marginBottom: 16 }}>
         <div className="sectionTitle">Steps</div>
-        <div style={{ marginBottom: 8 }}>
-          <label style={{ marginRight: 8 }}>Status filter:</label>
+        <div className="runDetailFilters">
+          <label className="runDetailFilters__label">Status filter:</label>
           <select value={stepStatusFilter} onChange={(e) => setStepStatusFilter(e.target.value as any)}>
             <option value="all">all</option>
             <option value="pending">pending</option>
@@ -425,7 +425,7 @@ export default function RunDetailPage() {
 
       <div className="pageSection" style={{ marginBottom: 16 }}>
         <div className="sectionTitle">Run Timeline</div>
-        <div className="timelinePanel" style={{ padding: "12px 0" }}>
+        <div className="timelinePanel">
           {filteredLogs
             .filter((log) =>
               log.message?.startsWith("[RUN START]") ||
@@ -448,16 +448,16 @@ export default function RunDetailPage() {
               else if (log.message?.startsWith("[STEP TIMEOUT]")) label = log.message;
               else if (log.message?.startsWith("[STEP FAIL]")) label = log.message;
               return (
-                <div key={i} className="logRow" style={{ marginBottom: 8 }}>
-                  <div className="logTime" style={{ minWidth: 80, fontSize: "1.2rem", fontWeight: "bold" }}>
+                <div key={i} className="logRow timelinePanel__row">
+                  <div className="logTime timelinePanel__time">
                     {log.createdAt ? new Date(log.createdAt).toLocaleTimeString() : ""}
                   </div>
-                  <div className={`logMsg ${logKind(log.level)}`} style={{ fontSize: "1.2rem", fontWeight: "bold" }}>{label}</div>
+                  <div className={`logMsg ${logKind(log.level)} timelinePanel__msg`}>{label}</div>
                   {log.stepId && log.stepId !== "system" && (
-                    <span style={{ marginLeft: 8, opacity: 0.8, color: getStepColor(log.stepId), fontSize: "1.2rem", fontWeight: "bold" }}>[{log.stepId}]</span>
+                    <span className="timelinePanel__step" style={{ color: getStepColor(log.stepId) }}>[{log.stepId}]</span>
                   )}
                   {shouldShowSeparateLogError(log.message, log.error) ? (
-                    <div style={{ marginLeft: 88, fontSize: "0.95rem", color: "#fca5a5", marginTop: 4 }}>{log.error}</div>
+                    <div className="timelinePanel__error">{log.error}</div>
                   ) : null}
                 </div>
               );

@@ -90,7 +90,7 @@ export async function fetchVersionDiff(
 
 export async function startRun(
   workflowId: string,
-  options?: { workflowVersion?: number }
+  options?: { workflowVersion?: number; triggerPayload?: Record<string, unknown> }
 ): Promise<{ message: string; runId: string }> {
   return apiFetch<{ message: string; runId: string }>(`/workflows/${workflowId}/run`, {
     method: "POST",

@@ -837,6 +837,7 @@ export default function WorkflowEditPage() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (editingStep) return;
       if (e.key === "Escape") {
         setEditingStep(null);
         setQuickAddMenu(null);
@@ -860,7 +861,7 @@ export default function WorkflowEditPage() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [nodes, deleteNodes, handleSaveWorkflow]);
+  }, [nodes, deleteNodes, handleSaveWorkflow, editingStep]);
 
   const runAutoLayout = useCallback(() => {
     const steps = buildSteps();
@@ -1029,9 +1030,9 @@ export default function WorkflowEditPage() {
               maxWidth: 320,
               padding: "8px 10px",
               borderRadius: 6,
-              border: "1px solid #374151",
-              background: "#0b1220",
-              color: "#e5e7eb",
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              color: "#0f172a",
               fontSize: 16,
               fontWeight: 600,
             }}
@@ -1082,9 +1083,9 @@ export default function WorkflowEditPage() {
               style={{
                 padding: "6px 10px",
                 borderRadius: 6,
-                border: "1px solid #374151",
-                background: "#0b1220",
-                color: "#e5e7eb",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#0f172a",
                 fontSize: 13,
                 minWidth: 120,
               }}
@@ -1109,9 +1110,9 @@ export default function WorkflowEditPage() {
                   style={{
                     padding: "6px 10px",
                     borderRadius: 6,
-                    border: "1px solid #374151",
-                    background: "#0b1220",
-                    color: "#e5e7eb",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    color: "#0f172a",
                     fontSize: 13,
                     width: 140,
                   }}
@@ -1130,9 +1131,9 @@ export default function WorkflowEditPage() {
                   style={{
                     padding: "6px 10px",
                     borderRadius: 6,
-                    border: "1px solid #374151",
-                    background: "#0b1220",
-                    color: "#e5e7eb",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    color: "#0f172a",
                     fontSize: 13,
                     width: 160,
                   }}
@@ -1154,9 +1155,9 @@ export default function WorkflowEditPage() {
                 style={{
                   padding: "6px 10px",
                   borderRadius: 6,
-                  border: "1px solid #374151",
-                  background: "#0b1220",
-                  color: "#e5e7eb",
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  color: "#0f172a",
                   fontSize: 13,
                   width: 220,
                 }}
@@ -1342,7 +1343,7 @@ export default function WorkflowEditPage() {
                   onConnectEndRequest={(position, sourceNodeId, sourceHandle) =>
                     setQuickAddMenu({ position, sourceNodeId, sourceHandle })
                   }
-                  onPaneContextMenuRequest={(position) => setQuickAddMenu({ position })}
+                  onPaneContextMenuRequest={() => {}}
                 />
               </ReactFlowProvider>
             </WorkflowEditorContext.Provider>

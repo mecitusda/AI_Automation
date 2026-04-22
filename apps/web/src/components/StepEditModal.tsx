@@ -40,13 +40,25 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
   const [pluginMeta, setPluginMeta] = useState<PluginInfo | null>(null);
   const [credentialsList, setCredentialsList] = useState<CredentialMeta[]>([]);
   const insertHandlerRef = useRef<((path: string) => void) | null>(null);
+  const initialSnapshotRef = useRef("");
   const runData = useRunData();
+
+  const serializeStepDraft = (draftParams: Record<string, unknown>, draftRetry: number, draftTimeout: number) =>
+    JSON.stringify({
+      params: draftParams ?? {},
+      retry: Number.isFinite(draftRetry) ? draftRetry : 0,
+      timeout: Number.isFinite(draftTimeout) ? draftTimeout : 0,
+    });
   
   useEffect(() => {
     if (!step) return;
-    setParams(step.params ?? {});
-    setRetry(step.retry ?? 0);
-    setTimeoutMs(step.timeout ?? 0);
+    const nextParams = step.params ?? {};
+    const nextRetry = step.retry ?? 0;
+    const nextTimeout = step.timeout ?? 0;
+    setParams(nextParams);
+    setRetry(nextRetry);
+    setTimeoutMs(nextTimeout);
+    initialSnapshotRef.current = serializeStepDraft(nextParams, nextRetry, nextTimeout);
     setErrors({});
     setRunOutputsByStep(null);
     setPluginMeta(null);
@@ -121,18 +133,47 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
     [stepErrorsFromWorkflow, errors]
   );
   const effectiveWarnings = stepWarningsFromWorkflow ?? {};
+  const isDirty = serializeStepDraft(params, retry, timeoutMs) !== initialSnapshotRef.current;
+
+  const requestClose = () => {
+    if (isDirty) {
+      const shouldClose = window.confirm("You have unsaved changes in this step. Close without saving?");
+      if (!shouldClose) return;
+    }
+    onClose();
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      requestClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isDirty]);
 
   const handleSave = () => {
+    const paramsWithSchemaDefaults = useSchemaForm
+      ? (pluginMeta?.schema ?? []).reduce<Record<string, unknown>>((acc, field) => {
+          if (acc[field.key] === undefined && field.default !== undefined) {
+            acc[field.key] = field.default;
+          }
+          return acc;
+        }, { ...params })
+      : params;
+
     const errs = useSchemaForm
-      ? validateParamsFromSchema(pluginMeta?.schema, params)
-      : validateNodeParams(step.type, params);
+      ? validateParamsFromSchema(pluginMeta?.schema, paramsWithSchemaDefaults)
+      : validateNodeParams(step.type, paramsWithSchemaDefaults);
 
     // Extra safety for HTTP nodes: when method != GET, body must be valid JSON.
     // Some forms may store invalid JSON as a string; block Save in that case.
     if (step.type === "http") {
-      const method = String(params?.method ?? "GET").toUpperCase();
-      if (method !== "GET" && typeof params?.body === "string") {
-        const t = params.body.trim();
+      const method = String(paramsWithSchemaDefaults?.method ?? "GET").toUpperCase();
+      if (method !== "GET" && typeof paramsWithSchemaDefaults?.body === "string") {
+        const t = paramsWithSchemaDefaults.body.trim();
         if (t) {
           try {
             JSON.parse(t);
@@ -142,17 +183,18 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
         }
       }
     }
-    if (credentialRequired && (params.credentialId == null || String(params.credentialId).trim() === "")) {
+    if (credentialRequired && (paramsWithSchemaDefaults.credentialId == null || String(paramsWithSchemaDefaults.credentialId).trim() === "")) {
       errs.credentialId = "Credential is required";
     }
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
     onSave({
       ...step,
-      params,
+      params: paramsWithSchemaDefaults,
       retry,
       timeout: timeoutMs,
     });
+    initialSnapshotRef.current = serializeStepDraft(paramsWithSchemaDefaults, retry, timeoutMs);
     onClose();
   };
 
@@ -210,9 +252,9 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
   };
 
   return (
-    <div className="modalOverlay">
+    <div className="modalOverlay" onClick={requestClose}>
       <div className="modalCard modalCard--stepEdit" onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="modalCloseButton" onClick={onClose} aria-label="Close">
+        <button type="button" className="modalCloseButton" onClick={requestClose} aria-label="Close">
           ×
         </button>
         <div className="stepEditModal__layout">
@@ -328,7 +370,7 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
 
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button onClick={handleSave}>Save</button>
-              <button onClick={onClose}>Cancel</button>
+              <button onClick={requestClose}>Cancel</button>
             </div>
           </div>
 

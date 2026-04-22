@@ -69,7 +69,7 @@ body{
 
 .subtle{
   font-size: 13px;
-  color:#8b949e;
+  color:#6b7280;
 }
 
 /* ========== CARD ========== */
@@ -81,16 +81,16 @@ body{
 }
 
 .card{
-  background:#121826;
-  border:1px solid rgba(255,255,255,.06);
+  background:#ffffff;
+  border:1px solid #e5e7eb;
   border-radius:6px;
   padding:22px;
   transition: all .25s ease;
 }
 
 .card:hover{
-  border-color:rgba(59,130,246,.4);
-  box-shadow: 0 0 25px rgba(59,130,246,.2);
+  border-color:rgba(59,130,246,.25);
+  box-shadow: 0 8px 20px rgba(15,23,42,.08);
 }
 
 /* ========== PROGRESS ========== */
@@ -190,9 +190,9 @@ body{
   }
 
   button {
-    background-color: #1e2130;
-    color: #ffffff;
-    border: 1px solid #6b7280;
+    background-color: #f8fafc;
+    color: #111827;
+    border: 1px solid #cbd5e1;
     padding: 5px 12px;
     font-size: 13px;
     cursor: pointer;
@@ -201,13 +201,13 @@ body{
   }
 
   button:hover {
-    background-color: #2d3348;
-    border-color: #9ca3af;
-    color: #ffffff;
+    background-color: #eef2f7;
+    border-color: #94a3b8;
+    color: #0f172a;
   }
 
   button:active {
-    background-color: #3b4261;
+    background-color: #e2e8f0;
   }
 
   .cancelBtn {

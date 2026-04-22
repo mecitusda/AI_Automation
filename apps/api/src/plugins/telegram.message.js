@@ -162,7 +162,7 @@ export default {
   executor: async ({ params, credentials, signal, context }) => {
     const operation = params?.operation || "sendMessage";
     const providerMode = params?.providerMode || "bot_api";
-    const botToken = credentials?.botToken || params?.botToken;
+    const botToken = credentials?.botToken || credentials?.token || params?.botToken || params?.token;
     const payload = buildPayload(operation, params || {});
     const requestHash = sha256Json({ providerMode, operation, payload });
     const dedupeKey = createOutboundDedupeKey({

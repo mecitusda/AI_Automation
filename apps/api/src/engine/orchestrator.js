@@ -740,7 +740,74 @@ async function dispatchReadySteps({
         items = coerceForeachItems(resolveVariables(stepPlain.params?.items, context));
         if (!Array.isArray(items)) {
           const type = items === null ? "null" : Array.isArray(items) ? "array" : typeof items;
-          throw new Error(`foreach items must be array (got ${type})`);
+          const errMsg = `foreach items must be array (got ${type})`;
+          const now = new Date();
+
+          await Run.updateOne(
+            {
+              _id: runId,
+              stepStates: {
+                $elemMatch: {
+                  stepId: stepPlain.id,
+                  iteration: 0,
+                  status: { $in: ["pending", "running"] }
+                }
+              }
+            },
+            {
+              $set: {
+                "stepStates.$.status": "failed",
+                "stepStates.$.finishedAt": now
+              }
+            }
+          );
+          emitStepUpdate(runId, stepPlain.id, 0, "failed", io);
+
+          await Run.updateOne(
+            { _id: runId },
+            {
+              $set: {
+                status: "failed",
+                finishedAt: now,
+                durationMs: now.getTime() - run.createdAt.getTime(),
+                lastError: {
+                  stepId: stepPlain.id,
+                  message: errMsg,
+                  iteration: 0
+                }
+              }
+            }
+          );
+
+          await dequeueReadyRun(runId);
+          await incrMetric("run.failed");
+
+          await addRunLog(
+            runId,
+            {
+              stepId: stepPlain.id,
+              message: `[STEP FAIL] ${stepPlain.id}: ${errMsg}`,
+              createdAt: now,
+              level: "error",
+              status: "fail"
+            },
+            io
+          );
+          await addRunLog(
+            runId,
+            {
+              stepId: "system",
+              message: "Run failed",
+              createdAt: new Date(),
+              level: "error"
+            },
+            io
+          );
+
+          const failedRun = await Run.findById(runId);
+          emitRunUpdate(failedRun, io);
+          await propagateRunFailure({ runId, failedStepId: stepPlain.id, io });
+          return;
         }
 
         const initialLoopContext = {
