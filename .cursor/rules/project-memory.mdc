@@ -1,8 +1,0 @@
----
-description: Proje mimarisi ve teknik bağlam için hafıza belgesine başvur.
-alwaysApply: true
----
-
-# Proje teknik bağlamı
-
-Kod veya mimari ile ilgili görevlere başlarken, güncel teknik özeti okumak için depodaki [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md) dosyasını kullan. Önemli değişiklikler yaptığında aynı dosyayı güncelle (route, queue, env, plugin, auth, test/CI).
