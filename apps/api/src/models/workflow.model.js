@@ -10,6 +10,11 @@ const stepSchema = new mongoose.Schema({
   retry: { type: Number, default: 0 },
   retryDelay: { type: Number }, // ms to wait before each retry (optional; else exponential backoff)
   dependsOn: { type: [String], default: [] },
+  dependencyModes: {
+    type: Map,
+    of: { type: String, enum: ["iteration", "barrier"] },
+    default: {}
+  },
   /** When set, this step is reached from a switch node's output handle; only run when switch output.branch matches. */
   branch: { type: String },
   /** When set, this step is connected from the error port of the given stepId; runs when that step fails after retries. */
@@ -67,4 +72,8 @@ const workflowSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-export const Workflow = mongoose.model("Workflow", workflowSchema);
+export function getWorkflowModel(conn = mongoose.connection) {
+  return conn.models.Workflow || conn.model("Workflow", workflowSchema);
+}
+
+export const Workflow = getWorkflowModel();

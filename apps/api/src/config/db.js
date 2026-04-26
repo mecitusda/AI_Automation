@@ -17,3 +17,12 @@ export async function connectDB() {
     process.exit(1);
   }
 }
+
+export function getPlatformConnection() {
+  return mongoose.connection;
+}
+
+export function getTenantConnection(tenantId) {
+  void tenantId;
+  return mongoose.connection;
+}

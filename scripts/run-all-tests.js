@@ -10,6 +10,8 @@ const tests = [
   "test:timeout",
   "test:concurrency",
   "test:cancel",
+  "test:nested-loops",
+  "test:foreach-gate",
 ];
 
 const extendedTests = [

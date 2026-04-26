@@ -20,4 +20,8 @@ credentialSchema.set("toJSON", {
   }
 });
 
-export const Credential = mongoose.model("Credential", credentialSchema);
+export function getCredentialModel(conn = mongoose.connection) {
+  return conn.models.Credential || conn.model("Credential", credentialSchema);
+}
+
+export const Credential = getCredentialModel();

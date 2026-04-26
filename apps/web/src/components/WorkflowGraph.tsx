@@ -2,16 +2,19 @@ import ReactFlow, {
   Background,
   Controls,
   MiniMap,
+  useEdgesState,
+  useNodesState,
   type Node,
   type Edge,
-  type NodeMouseHandler
+  type NodeMouseHandler,
+  type ReactFlowInstance
 } from "reactflow";
 import dagre from "dagre";
 import "reactflow/dist/style.css";
 import type { WorkflowDetail } from "../api/workflow";
 import IfNode from "./IfNode";
 import DefaultNode from "./DefaultNode";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   READONLY_DEFAULT_PLUGIN_HANDLES,
   READONLY_IF_HANDLES,
@@ -19,10 +22,10 @@ import {
   stepHasOutgoingErrorPort,
 } from "../utils/workflowGraphEdges";
 
-const nodeTypes = {
+const NODE_TYPES = Object.freeze({
   ifNode: IfNode,
   defaultNode: DefaultNode
-};
+});
 
 type StepState = {
   stepId: string;
@@ -59,10 +62,7 @@ function selectPrimaryStepState(statesForStep: StepState[]): { primary?: StepSta
 }
 
 function getLayoutedElements(
-  steps: Step[],
-  stepStates?: StepState[],
-  loopProgressByStep?: Record<string, { current: number; total: number }>,
-  failureHintByStepId?: Record<string, string>
+  steps: Step[]
 ) {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
@@ -106,10 +106,6 @@ function getLayoutedElements(
   const nodes: Node[] = steps.map(step => {
     const nodeWithPosition = dagreGraph.node(step.id);
 
-    const statesForStep = stepStates?.filter(s => s.stepId === step.id) ?? [];
-    const { primary: primaryState, status } = selectPrimaryStepState(statesForStep);
-    const iterations = statesForStep.map(s => s.iteration ?? 0).sort((a, b) => a - b);
-
     const handles = step.type === "if" ? READONLY_IF_HANDLES : READONLY_DEFAULT_PLUGIN_HANDLES;
 
     return {
@@ -128,13 +124,6 @@ function getLayoutedElements(
         stepType: step.type,
         params: step.params,
         handles,
-        status,
-        retryCount: primaryState?.retryCount ?? 0,
-        iteration: primaryState?.iteration,
-        iterations: iterations.length > 0 ? iterations : undefined,
-        progressCurrent: step.type === "foreach" ? loopProgressByStep?.[step.id]?.current : undefined,
-        progressTotal: step.type === "foreach" ? loopProgressByStep?.[step.id]?.total : undefined,
-        failureHint: failureHintByStepId?.[step.id] ?? "",
       },
     };
   });
@@ -228,45 +217,187 @@ function getLayoutedElements(
   return { nodes, edges };
 }
 
+type NodeData = Record<string, unknown>;
+
+function buildNodeData(
+  baseData: NodeData,
+  statesForStep: StepState[],
+  loopProgress: { current: number; total: number } | undefined,
+  failureHint: string | undefined
+): NodeData {
+  const { primary: primaryState, status } = selectPrimaryStepState(statesForStep);
+  const iterations = statesForStep.map((s) => s.iteration ?? 0).sort((a, b) => a - b);
+  const stepType = (baseData as { stepType?: string }).stepType;
+  return {
+    ...baseData,
+    status,
+    retryCount: primaryState?.retryCount ?? 0,
+    iteration: primaryState?.iteration,
+    iterations: iterations.length > 0 ? iterations : undefined,
+    progressCurrent: stepType === "foreach" ? loopProgress?.current : undefined,
+    progressTotal: stepType === "foreach" ? loopProgress?.total : undefined,
+    failureHint: failureHint ?? (baseData as { failureHint?: string }).failureHint ?? "",
+  };
+}
+
+function shallowEqualData(a: NodeData, b: NodeData): boolean {
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  for (const k of ak) {
+    if (!Object.is(a[k], b[k])) return false;
+  }
+  return true;
+}
+
 function WorkflowGraph({ steps, onNodeClick, stepStates, loopProgressByStep, failureHintByStepId }: Props) {
-  const baseLayout = useMemo(
-    () => getLayoutedElements(steps, undefined, undefined, failureHintByStepId),
-    [steps, failureHintByStepId]
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
+  const nodeTypes = useMemo(() => NODE_TYPES, []);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const lastStableLayoutRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
+  const lastFittedSignatureRef = useRef<string>("");
+  const debugRef = useRef({ emits: 0, fitCount: 0, lastNodeCount: -1, fallbackCount: 0 });
+  const topologySignature = useMemo(
+    () =>
+      steps
+        .map((s) => {
+          const dependsOn = (s.dependsOn ?? []).join(",");
+          const thenGoto = typeof s.params?.thenGoto === "string" ? s.params.thenGoto : "";
+          const elseGoto = typeof s.params?.elseGoto === "string" ? s.params.elseGoto : "";
+          return `${s.id}:${s.type}:${dependsOn}:${s.branch ?? ""}:${s.errorFrom ?? ""}:${thenGoto}:${elseGoto}`;
+        })
+        .join("|"),
+    [steps]
   );
 
-  const nodes = useMemo(() => {
-    if (!stepStates || stepStates.length === 0) return baseLayout.nodes;
-    const statesByStep = new Map<string, StepState[]>();
-    for (const s of stepStates) {
-      const list = statesByStep.get(s.stepId) ?? [];
-      list.push(s);
-      statesByStep.set(s.stepId, list);
+  const baseLayout = useMemo(() => {
+    if (!Array.isArray(steps) || steps.length === 0) {
+      if (debugRef.current.fallbackCount < 40) {
+        debugRef.current.fallbackCount += 1;
+        console.warn("[WorkflowGraphFallbackLayout]", {
+          fallbackCount: debugRef.current.fallbackCount,
+          cachedNodes: lastStableLayoutRef.current?.nodes.length ?? 0,
+        });
+      }
+      return lastStableLayoutRef.current ?? { nodes: [], edges: [] };
     }
-    return baseLayout.nodes.map(node => {
-      const statesForStep = statesByStep.get(node.id) ?? [];
-      const { primary: primaryState, status } = selectPrimaryStepState(statesForStep);
-      const iterations = statesForStep.map(s => s.iteration ?? 0).sort((a, b) => a - b);
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          status,
-          retryCount: primaryState?.retryCount ?? 0,
-          iteration: primaryState?.iteration,
-          iterations: iterations.length > 0 ? iterations : undefined,
-          progressCurrent: (node.data as { stepType?: string }).stepType === "foreach"
-            ? loopProgressByStep?.[node.id]?.current
-            : undefined,
-          progressTotal: (node.data as { stepType?: string }).stepType === "foreach"
-            ? loopProgressByStep?.[node.id]?.total
-            : undefined,
-          failureHint: failureHintByStepId?.[node.id] ?? (node.data as { failureHint?: string }).failureHint ?? "",
-        },
-      };
-    });
-  }, [baseLayout.nodes, stepStates, loopProgressByStep, failureHintByStepId]);
+    const computed = getLayoutedElements(steps);
+    if (computed.nodes.length > 0) {
+      lastStableLayoutRef.current = computed;
+    }
+    return computed;
+  }, [topologySignature]);
 
-  const edges = baseLayout.edges;
+  // ReactFlow-managed state. We feed React Flow's internal store via
+  // `setNodes`/`setEdges` so it doesn't have to re-sync its store from the
+  // `nodes` prop on every parent render. Without this, fast socket updates
+  // were causing brief reconciliation gaps that visually emptied the graph.
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+  // Sync topology (positions / edges / node types) only when the topology
+  // signature changes. Existing node data is preserved so we don't blink
+  // status colors when only the layout was recomputed.
+  useEffect(() => {
+    if (baseLayout.nodes.length === 0) {
+      // Don't blow away whatever ReactFlow already shows. Keeping the previous
+      // nodes prevents the graph from flashing empty during transient empty
+      // step arrays.
+      return;
+    }
+    setEdges(baseLayout.edges);
+    setNodes((prev) => {
+      const prevById = new Map(prev.map((n) => [n.id, n]));
+      return baseLayout.nodes.map((layoutNode) => {
+        const existing = prevById.get(layoutNode.id);
+        if (!existing) return layoutNode;
+        return {
+          ...layoutNode,
+          data: { ...layoutNode.data, ...existing.data },
+        };
+      });
+    });
+  }, [baseLayout.nodes, baseLayout.edges, setNodes, setEdges]);
+
+  // Patch node `data` in place when step states / loop progress / failure
+  // hints change. We only return a new node reference when its data actually
+  // changed so ReactFlow can short-circuit unchanged nodes.
+  useEffect(() => {
+    setNodes((prev) => {
+      if (prev.length === 0) return prev;
+      const statesByStep = new Map<string, StepState[]>();
+      for (const s of stepStates ?? []) {
+        const list = statesByStep.get(s.stepId) ?? [];
+        list.push(s);
+        statesByStep.set(s.stepId, list);
+      }
+      let changed = false;
+      const next = prev.map((node) => {
+        const statesForStep = statesByStep.get(node.id) ?? [];
+        const newData = buildNodeData(
+          node.data as NodeData,
+          statesForStep,
+          loopProgressByStep?.[node.id],
+          failureHintByStepId?.[node.id]
+        );
+        if (shallowEqualData(node.data as NodeData, newData)) return node;
+        changed = true;
+        return { ...node, data: newData };
+      });
+      return changed ? next : prev;
+    });
+  }, [stepStates, loopProgressByStep, failureHintByStepId, setNodes]);
+
+  useEffect(() => {
+    if (!rfInstance) return;
+    if (!nodes.length) return;
+    if (!topologySignature) return;
+    if (lastFittedSignatureRef.current === topologySignature) return;
+    lastFittedSignatureRef.current = topologySignature;
+    if (!import.meta.env.PROD) {
+      debugRef.current.fitCount += 1;
+    }
+    requestAnimationFrame(() => {
+      rfInstance.fitView({ padding: 0.2 });
+    });
+  }, [rfInstance, topologySignature, nodes.length]);
+
+  useEffect(() => {
+    if (!rfInstance) return;
+    if (!nodes.length) return;
+    const el = containerRef.current;
+    if (!el) return;
+    let resizeFitRaf = 0;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width < 50 || height < 50) return;
+      if (resizeFitRaf) cancelAnimationFrame(resizeFitRaf);
+      resizeFitRaf = requestAnimationFrame(() => {
+        rfInstance.fitView({ padding: 0.2 });
+      });
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      if (resizeFitRaf) cancelAnimationFrame(resizeFitRaf);
+    };
+  }, [rfInstance, nodes.length]);
+
+  useEffect(() => {
+    if (import.meta.env.PROD) return;
+    const dbg = debugRef.current;
+    const nodeCount = nodes.length;
+    if (dbg.lastNodeCount === nodeCount || dbg.emits >= 30) return;
+    dbg.lastNodeCount = nodeCount;
+    dbg.emits += 1;
+    console.debug("[WorkflowGraphDebug]", {
+      emit: dbg.emits,
+      nodeCount,
+      fitViewCount: dbg.fitCount
+    });
+  }, [nodes.length]);
 
   const handleNodeClick: NodeMouseHandler = (_event, node) => {
     const step = steps.find(s => s.id === node.id);
@@ -276,11 +407,13 @@ function WorkflowGraph({ steps, onNodeClick, stepStates, loopProgressByStep, fai
   };
 
   return (
-    <div style={{ height: 500 }}>
+    <div ref={containerRef} style={{ height: 500 }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        fitView
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onInit={setRfInstance}
         onNodeClick={handleNodeClick}
         nodeTypes={nodeTypes}
       >

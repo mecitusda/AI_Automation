@@ -13,8 +13,12 @@ export type RunDetailStep = {
   id: string;
   type: string;
   retry?: number;
+  retryDelay?: number;
   timeout?: number;
   dependsOn?: string[];
+  dependencyModes?: Record<string, "iteration" | "barrier">;
+  branch?: string;
+  errorFrom?: string;
   disabled?: boolean;
   params?: Record<string, unknown>;
 };
@@ -51,6 +55,7 @@ export type RunDetail = {
   id: string;
   workflowId?: string;
   status: string;
+  topologySource?: string;
   createdAt: string;
   finishedAt?: string;
   durationMs?: number;
@@ -65,8 +70,8 @@ export type RunDetail = {
   stepInputs?: Record<string, RunDetailStepInput>;
 };
 
-export async function fetchRunDetail(id: string): Promise<RunDetail> {
-  return apiFetch<RunDetail>(`/runs/${id}/detail`);
+export async function fetchRunDetail(id: string, init?: RequestInit): Promise<RunDetail> {
+  return apiFetch<RunDetail>(`/runs/${id}/detail`, init);
 }
 
 export type RunSummary = {

@@ -39,6 +39,7 @@ export function getCurrentUserRole(): string {
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAccessToken();
   const res = await fetch(`${API_URL}${path}`, {
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

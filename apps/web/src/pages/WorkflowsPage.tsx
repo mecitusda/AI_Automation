@@ -14,6 +14,7 @@ import type {
 
 export default function WorkflowsPage() {
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
+  const [loadError, setLoadError] = useState("");
   const [versions, setVersions] = useState<
     Record<string, WorkflowVersionInfo[]>
   >({});
@@ -21,11 +22,22 @@ export default function WorkflowsPage() {
   const navigate = useNavigate();
   // initial load
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
-      const data = await fetchWorkflows();
-      setWorkflows(data);
+      try {
+        const data = await fetchWorkflows();
+        if (!cancelled) {
+          setWorkflows(data);
+          setLoadError("");
+        }
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Failed to load workflows");
+      }
     };
     load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 🔥 realtime workflow create listener
@@ -84,6 +96,12 @@ export default function WorkflowsPage() {
         </button>
       </header>
       <main className="pageContent">
+      {loadError ? <p style={{ color: "#ef4444", marginBottom: 12 }}>{loadError}</p> : null}
+      {!loadError && workflows.length === 0 ? (
+        <p style={{ color: "#475569", marginBottom: 12 }}>
+          No workflows found for this account.
+        </p>
+      ) : null}
       <div className="cards">
       {workflows.map(w => (
         <div 

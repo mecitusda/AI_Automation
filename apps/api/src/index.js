@@ -24,9 +24,11 @@ import templateRoutes from "./routes/template.routes.js";
 import pluginRoutes from "./routes/plugin.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import telegramRoutes from "./routes/telegram.routes.js";
+import workflowVariablesRoutes from "./routes/workflowVariables.routes.js";
 import { seedTemplatesIfEmpty } from "./data/seedTemplates.js";
 import authRoutes from "./routes/auth.routes.js";
 import { authOptional, requireAdmin, requireAuth } from "./middleware/auth.js";
+import { apiPerfMiddleware } from "./utils/apiPerf.js";
 
 const app = express();
 
@@ -36,6 +38,7 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 app.use(express.json({ limit: process.env.MAX_PAYLOAD_SIZE || "1mb" }));
+app.use(apiPerfMiddleware);
 
 
 await connectRabbit();
@@ -59,6 +62,7 @@ app.use("/templates", requireAuth, templateRoutes);
 app.use("/plugins", pluginRoutes);
 app.use("/users", requireAuth, userRoutes);
 app.use("/telegram", requireAuth, telegramRoutes);
+app.use("/workflow-variables", requireAuth, workflowVariablesRoutes);
 app.use("/metrics", requireAuth, requireAdmin, metricRoutes);
 app.use("/monitoring", requireAuth, requireAdmin, monitoringRoutes);
 

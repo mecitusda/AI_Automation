@@ -41,4 +41,8 @@ telegramSessionSchema.pre("save", function onSave(next) {
   next();
 });
 
-export const TelegramSession = mongoose.model("TelegramSession", telegramSessionSchema);
+export function getTelegramSessionModel(conn = mongoose.connection) {
+  return conn.models.TelegramSession || conn.model("TelegramSession", telegramSessionSchema);
+}
+
+export const TelegramSession = getTelegramSessionModel();

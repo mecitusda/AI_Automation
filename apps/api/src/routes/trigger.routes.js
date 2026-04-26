@@ -1,16 +1,15 @@
 import express from "express";
-import { Workflow } from "../models/workflow.model.js";
-import { Run } from "../models/run.model.js";
 import { channel } from "../config/rabbit.js";
 import { checkWebhookRateLimit } from "../utils/webhookRateLimiter.js";
 import { checkWebhookIpThrottle, verifyWebhookSignature } from "../utils/webhookSecurity.js";
-import { Credential } from "../models/credential.model.js";
 import { decrypt } from "../utils/credentialCrypto.js";
 import { createTelegramEvent, findTelegramEventByUpdate } from "../utils/telegram/telegramEventStore.js";
 import { logInfo, logWarn } from "../utils/logger.js";
 import { incrMetric } from "../utils/metricsCounter.js";
+import { getPlatformModels } from "../utils/tenantModels.js";
 
 const router = express.Router();
+const modelsOf = () => getPlatformModels();
 
 /**
  * Build triggerPayload for webhook in canonical shape:
@@ -36,6 +35,7 @@ function buildTriggerPayload(body, query) {
  * Used by both GET and POST.
  */
 async function handleWebhook(req, res, bodyOverride = undefined) {
+  const { Workflow, Run } = modelsOf(req);
   const { workflowId } = req.params;
   const clientIp = String(
     req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
@@ -138,6 +138,7 @@ function normalizeTelegramTriggerPayload(update) {
 }
 
 async function loadTelegramBotCredential(workflow) {
+  const { Credential } = getPlatformModels();
   const credentialId = workflow.trigger?.credentialId;
   if (!credentialId) return null;
   const cred = await Credential.findOne({ _id: credentialId, userId: workflow.userId }).lean();
@@ -152,6 +153,7 @@ async function loadTelegramBotCredential(workflow) {
 }
 
 async function handleTelegramTrigger(req, res) {
+  const { Workflow, Run } = modelsOf(req);
   const { workflowId } = req.params;
   const update = req.body && typeof req.body === "object" ? req.body : {};
   const updateId = Number(update?.update_id ?? -1);
@@ -181,7 +183,11 @@ async function handleTelegramTrigger(req, res) {
 
   const credential = await loadTelegramBotCredential(workflow);
   const botId = credential?.data?.botUsername || credential?.data?.botId || String(workflow.trigger?.credentialId || "");
-  const duplicate = await findTelegramEventByUpdate("bot_api", botId, updateId);
+  const duplicate = await findTelegramEventByUpdate(
+    "bot_api",
+    botId,
+    updateId
+  );
   if (duplicate) {
     await incrMetric("telegram.trigger.dedupe", 1);
     return res.status(200).json({ ok: true, deduped: true });

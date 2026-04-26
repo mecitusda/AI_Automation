@@ -28,6 +28,7 @@
   box-sizing: border-box;
   background: #f5f6fb;
   color: #111827;
+  position: relative;
 }
 
 .pageHeader{
@@ -617,11 +618,33 @@
   border: 1px solid #dbe2ea;
   border-radius: 18px;
   padding: 18px;
-  /*max-height: 420px;*/
-  overflow:auto;
+  max-height: min(42vh, 420px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
   font-family: ui-monospace, monospace;
   font-size: 13px;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.4);
+}
+
+.logPanel__newLogsBtn{
+  position: sticky;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border: 1px solid rgba(59,130,246,.45);
+  border-radius: 999px;
+  background: rgba(30,64,175,.95);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(30,64,175,.25);
 }
 
 .logRow{

@@ -1,19 +1,14 @@
 import cron from "node-cron";
-import { Workflow } from "../models/workflow.model.js";
-import { Run } from "../models/run.model.js";
 import { channel } from "./rabbit.js";
 import { logInfo } from "../utils/logger.js";
+import { getPlatformModels } from "../utils/tenantModels.js";
 
 const activeJobs = new Map();
 
 export async function startScheduler() {
   logInfo("scheduler.starting", { message: "Scheduler starting..." });
-
-  const workflows = await Workflow.find({
-    enabled: true,
-    "trigger.type": "cron"
-  });
-
+  const { Workflow } = getPlatformModels();
+  const workflows = await Workflow.find({ enabled: true, "trigger.type": "cron" });
   for (const workflow of workflows) {
     registerCronWorkflow(workflow);
   }
@@ -22,7 +17,7 @@ export async function startScheduler() {
 export function registerCronWorkflow(workflow) {
   const cronExpression = workflow.trigger?.cron || workflow.trigger?.schedule;
   if (!cronExpression) return;
-
+  const { Run } = getPlatformModels();
   const id = workflow._id.toString();
 
   // 🔥 Eğer zaten varsa önce durdur
@@ -74,9 +69,15 @@ export function registerCronWorkflow(workflow) {
 }
 
 export function stopCronWorkflow(workflowId) {
-  const job = activeJobs.get(workflowId);
-  if (job) {
-    job.stop();
+  const direct = activeJobs.get(workflowId);
+  if (direct) {
+    direct.stop();
     activeJobs.delete(workflowId);
+  }
+  for (const [key, job] of activeJobs.entries()) {
+    if (key === workflowId || key.endsWith(`:${workflowId}`)) {
+      job.stop();
+      activeJobs.delete(key);
+    }
   }
 }

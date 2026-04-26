@@ -1,12 +1,11 @@
 import { channel } from "../config/rabbit.js";
 import { getPlugin } from "../plugins/registry.js";
-import { Credential } from "../models/credential.model.js";
-import { Run } from "../models/run.model.js";
 import { redis } from "../config/redis.js";
 import { decrypt } from "../utils/credentialCrypto.js";
 import * as rateLimiter from "../utils/rateLimiter.js";
 import { normalizePluginResult } from "../utils/pluginResult.js";
 import { logInfo, logWarn, logError } from "../utils/logger.js";
+import { getPlatformModels } from "../utils/tenantModels.js";
 
 const controllers = new Map(); // executionId -> AbortController
 const DEBUG_RUN = process.env.DEBUG_RUN === "true";
@@ -44,33 +43,35 @@ function nextChaosRandom() {
   return chaosState / 4294967296;
 }
 
-function getCachedCredential(credentialId) {
-  const entry = credentialCache.get(credentialId);
+function getCachedCredential(cacheKey) {
+  const entry = credentialCache.get(cacheKey);
   if (!entry) return undefined;
   if (entry.expiresAt <= Date.now()) {
-    credentialCache.delete(credentialId);
+    credentialCache.delete(cacheKey);
     return undefined;
   }
   return entry.value;
 }
 
-function setCachedCredential(credentialId, data) {
+function setCachedCredential(cacheKey, data) {
   if (credentialCache.size >= CREDENTIAL_CACHE_MAX) {
     const firstKey = credentialCache.keys().next().value;
     if (firstKey !== undefined) credentialCache.delete(firstKey);
   }
-  credentialCache.set(credentialId, {
+  credentialCache.set(cacheKey, {
     value: data,
     expiresAt: Date.now() + CREDENTIAL_CACHE_TTL_MS,
   });
 }
 
-function invalidateCredentialCache(credentialId) {
-  credentialCache.delete(credentialId);
+function invalidateCredentialCache(cacheKey) {
+  credentialCache.delete(cacheKey);
 }
 
 async function resolveCredential(credentialId, { userId, runId, workflowId } = {}) {
-  const cached = getCachedCredential(credentialId);
+  const { Credential } = getPlatformModels();
+  const cacheKey = `${credentialId}`;
+  const cached = getCachedCredential(cacheKey);
   if (cached !== undefined) {
     await Credential.updateOne(
       { _id: credentialId, ...(userId ? { userId } : {}) },
@@ -85,7 +86,7 @@ async function resolveCredential(credentialId, { userId, runId, workflowId } = {
   if (!doc || !doc.data) return null;
   try {
     const data = decrypt(doc.data);
-    setCachedCredential(credentialId, data);
+    setCachedCredential(cacheKey, data);
     await Credential.updateOne(
       { _id: credentialId, ...(userId ? { userId } : {}) },
       {
@@ -95,12 +96,13 @@ async function resolveCredential(credentialId, { userId, runId, workflowId } = {
     );
     return data;
   } catch (err) {
-    invalidateCredentialCache(credentialId);
+    invalidateCredentialCache(cacheKey);
     throw err;
   }
 }
 
 async function isExecutionValidForRun({ runId, stepId, iteration = 0, executionId }) {
+  const { Run } = getPlatformModels();
   const run = await Run.findById(runId)
     .select({ status: 1, processedMessages: 1, stepStates: 1, userId: 1, workflowId: 1 })
     .lean();
@@ -282,7 +284,7 @@ export async function startWorker() {
             error: "Credential is required for this step",
             previousOutput,
             globalToken,
-            loopStepId
+              loopStepId
           }))
         );
         return channel.ack(msg);
@@ -411,8 +413,8 @@ export async function startWorker() {
                 signal: ctrl.signal,
                 context: {
                   runId,
-                  workflowId: runContext?.workflowId,
-                  userId: runContext?.userId,
+                  workflowId: runContext?.workflowId?.toString?.() ?? runContext?.workflowId,
+                  userId: runContext?.userId?.toString?.() ?? runContext?.userId,
                   stepId,
                   iteration: iteration ?? 0,
                   executionId,

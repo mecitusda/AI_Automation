@@ -9,6 +9,7 @@ import WorkflowEditPage from "./pages/WorkflowEditPage"
 import TemplatesPage from "./pages/TemplatesPage"
 import MetricsDashboardPage from "./pages/MetricsDashboardPage"
 import CredentialsPage from "./pages/CredentialsPage"
+import DataStorePage from "./pages/DataStorePage"
 import { RunDataProvider } from "./contexts/RunDataContext"
 import LoginPage from "./pages/LoginPage"
 import { clearAccessToken, getAccessToken, getCurrentUserRole } from "./api/client"
@@ -46,6 +47,7 @@ export default function App() {
               <Link to="/workflows" className={pathname.startsWith("/workflows") ? "active" : ""}>Workflows</Link>
               <Link to="/templates" className={pathname === "/templates" ? "active" : ""}>Templates</Link>
               <Link to="/credentials" className={pathname === "/credentials" ? "active" : ""}>Credentials</Link>
+              <Link to="/data-store" className={pathname === "/data-store" ? "active" : ""}>Data Store</Link>
               {isAdmin ? (
               <Link to="/metrics" className={pathname === "/metrics" ? "active" : ""}>Metrics</Link>
               ) : null}
@@ -84,6 +86,7 @@ export default function App() {
             <Route path="/workflows/:id/edit" element={<RequireAuth isAuthed={isAuthed}><WorkflowEditPage /></RequireAuth>} />
             <Route path="/templates" element={<RequireAuth isAuthed={isAuthed}><TemplatesPage /></RequireAuth>} />
             <Route path="/credentials" element={<RequireAuth isAuthed={isAuthed}><CredentialsPage /></RequireAuth>} />
+            <Route path="/data-store" element={<RequireAuth isAuthed={isAuthed}><DataStorePage /></RequireAuth>} />
             <Route path="*" element={<Navigate to={isAuthed ? "/" : "/login"} replace />} />
           </Routes>
         </div>

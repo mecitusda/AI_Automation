@@ -280,7 +280,7 @@ export default function CredentialsPage() {
           ) : null}
 
           {loading ? (
-            <div className="subtle">Loading...</div>
+            <div className="pageLayout"><div className="spinner" /></div>
           ) : rows.length === 0 ? (
             <div className="subtle">No credentials yet.</div>
           ) : (

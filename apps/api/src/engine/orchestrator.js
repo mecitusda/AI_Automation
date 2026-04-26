@@ -17,6 +17,7 @@ import { redactExecutionParams } from "../utils/redactExecutionParams.js";
 const READY_ZSET = "runs:ready";
 const GLOBAL_MAX = Number(process.env.GLOBAL_MAX_INFLIGHT || 10);
 const PROCESSED_MESSAGES_CAP = Number(process.env.PROCESSED_MESSAGES_CAP || 1000);
+const inferredDependencyModeWarnings = new Set();
 const INF_KEY = "global:inflight";     
 const TOK_SET = "global:tokens";       
 const TOK_TTL_MS = 10_000;             
@@ -330,7 +331,8 @@ function depsSatisfied(
   iteration = 0,
   activeLoopStepId = null,
   stepPlain = null,
-  workflow = null
+  workflow = null,
+  dependencyModeCache = null
 ) {
   if (!dependsOn?.length) return true;
 
@@ -348,21 +350,37 @@ function depsSatisfied(
   }
 
   return dependsOn.every(depId => {
-    // loop child step için özel kural:
-    // foreach step completed olmayı bekleme; aktif loop context veya loopState index yeterli
-    if (activeLoopStepId && depId === activeLoopStepId) {
-      if (
-        run.loopContext?.loopStepId === activeLoopStepId &&
-        (run.loopContext?.index ?? 0) === iteration
-      ) {
-        return true;
+    const depStep = workflow?.steps?.find((s) => s.id === depId);
+    const depStepPlain = depStep ? toPlain(depStep) : null;
+    const depMode = getDependencyMode({
+      stepPlain,
+      depId,
+      workflow,
+      dependencyModeCache
+    });
+    if (depStepPlain?.type === "foreach") {
+      // iteration mode: child can run during active loop iteration.
+      if (depMode === "iteration") {
+        if (activeLoopStepId && depId === activeLoopStepId) {
+          if (
+            run.loopContext?.loopStepId === activeLoopStepId &&
+            (run.loopContext?.index ?? 0) === iteration
+          ) {
+            return true;
+          }
+          // Step order: child may be checked before foreach sets loopContext; allow if loopState is at this iteration
+          const loopState = getLoopState(run, activeLoopStepId);
+          if (loopState && (loopState.index ?? 0) === iteration) {
+            return true;
+          }
+        }
+        return false;
       }
-      // Step order: child may be checked before foreach sets loopContext; allow if loopState is at this iteration
-      const loopState = getLoopState(run, activeLoopStepId);
-      if (loopState && (loopState.index ?? 0) === iteration) {
-        return true;
-      }
-      return false;
+      // barrier mode: downstream waits for foreach completion.
+      const foreachState = run.stepStates.find(
+        (s) => s.stepId === depId && (s.iteration ?? 0) === 0
+      );
+      return foreachState?.status === "completed";
     }
 
     const st = run.stepStates.find(
@@ -400,22 +418,135 @@ function getPreviousOutput(run, stepPlain, iteration = 0) {
   return buildPrevOutput(run, stepPlain?.dependsOn ?? [], iteration);
 }
 
+function stringContainsLoopRef(str, loopStepId) {
+  if (typeof str !== "string" || !str.includes("{{")) return false;
+  const loopRootRegex = /\{\{\s*loop\./;
+  if (loopRootRegex.test(str)) return true;
+  if (!loopStepId) return false;
+  const escaped = String(loopStepId).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const loopsRegex = new RegExp(`\\{\\{\\s*loops\\.${escaped}\\.`);
+  return loopsRegex.test(str);
+}
+
+function valueContainsLoopRef(value, loopStepId) {
+  if (typeof value === "string") return stringContainsLoopRef(value, loopStepId);
+  if (Array.isArray(value)) return value.some((v) => valueContainsLoopRef(v, loopStepId));
+  if (value && typeof value === "object") {
+    return Object.values(value).some((v) => valueContainsLoopRef(v, loopStepId));
+  }
+  return false;
+}
+
+function hasDescendantUsingLoopRef(stepId, loopStepId, workflow, visited = new Set()) {
+  if (visited.has(stepId)) return false;
+  visited.add(stepId);
+  const steps = workflow?.steps || [];
+  const descendants = steps.filter((s) => Array.isArray(s.dependsOn) && s.dependsOn.includes(stepId));
+  for (const desc of descendants) {
+    const descPlain = toPlain(desc);
+    if (valueContainsLoopRef(descPlain?.params, loopStepId)) return true;
+    if (hasDescendantUsingLoopRef(desc.id, loopStepId, workflow, visited)) return true;
+  }
+  return false;
+}
+
+function inferDependencyMode(stepPlain, depId, workflow) {
+  const depStep = workflow?.steps?.find((s) => s.id === depId);
+  const depType = toPlain(depStep)?.type;
+  if (depType !== "foreach") return "barrier";
+  if (!stepPlain) return "barrier";
+  // If the step or its descendants reference loop context, prefer iteration semantics.
+  if (valueContainsLoopRef(stepPlain.params, depId)) return "iteration";
+  if (hasDescendantUsingLoopRef(stepPlain.id, depId, workflow)) return "iteration";
+  return "barrier";
+}
+
+function getDependencyMode({ stepPlain, depId, workflow, dependencyModeCache = null }) {
+  const cacheKey = `${stepPlain?.id ?? "_"}::${depId}`;
+  if (dependencyModeCache?.has(cacheKey)) return dependencyModeCache.get(cacheKey);
+  const explicitModes = stepPlain?.dependencyModes;
+  const explicitRaw =
+    explicitModes && typeof explicitModes.get === "function"
+      ? explicitModes.get(depId)
+      : explicitModes?.[depId];
+  const explicit = typeof explicitRaw === "string" ? explicitRaw : null;
+  const resolved =
+    explicit === "iteration" || explicit === "barrier"
+      ? explicit
+      : inferDependencyMode(stepPlain, depId, workflow);
+  if (explicit == null && stepPlain?.id) {
+    const warnKey = `${stepPlain.id}->${depId}:${resolved}`;
+    if (!inferredDependencyModeWarnings.has(warnKey)) {
+      inferredDependencyModeWarnings.add(warnKey);
+      logInfo("orchestrator.dependency_mode.inferred", {
+        stepId: stepPlain.id,
+        dependsOn: depId,
+        inferredMode: resolved,
+        message: "dependencyModes missing; inferred compatibility mode"
+      });
+    }
+  }
+  dependencyModeCache?.set(cacheKey, resolved);
+  return resolved;
+}
+
 /**
  * True if this step is inside the loop: it depends on loopStepId directly or transitively.
  * Only such steps should use loop iteration; steps like HTTP before the loop must stay at iteration 0.
  */
-function isStepInsideLoop(stepId, loopStepId, workflow) {
+function isStepInsideLoop(stepId, loopStepId, workflow, dependencyModeCache = null) {
   const steps = workflow.steps || [];
   const visited = new Set();
   function dependsOnLoop(id) {
     if (visited.has(id)) return false;
     visited.add(id);
-    const step = steps.find(s => s.id === id);
-    if (!step?.dependsOn?.length) return false;
-    if (step.dependsOn.includes(loopStepId)) return true;
-    return step.dependsOn.some(depId => dependsOnLoop(depId));
+    const step = steps.find((s) => s.id === id);
+    const stepPlain = toPlain(step);
+    if (!stepPlain?.dependsOn?.length) return false;
+    if (
+      stepPlain.dependsOn.includes(loopStepId) &&
+      getDependencyMode({
+        stepPlain,
+        depId: loopStepId,
+        workflow,
+        dependencyModeCache
+      }) === "iteration"
+    ) {
+      return true;
+    }
+    return stepPlain.dependsOn.some((depId) => dependsOnLoop(depId));
   }
   return dependsOnLoop(stepId);
+}
+
+/**
+ * Returns foreach ancestors for a step in outer->inner order.
+ * Example: outerForeach -> innerForeach -> taskStep => ["outerForeach", "innerForeach"]
+ */
+function getForeachAncestorIds(stepId, workflow, cache = null, stack = new Set()) {
+  if (!stepId || !workflow?.steps?.length) return [];
+  if (cache?.has(stepId)) return cache.get(stepId);
+  if (stack.has(stepId)) return [];
+
+  stack.add(stepId);
+  const step = workflow.steps.find((s) => s.id === stepId);
+  const deps = Array.isArray(step?.dependsOn) ? step.dependsOn : [];
+  const ordered = [];
+
+  for (const depId of deps) {
+    const depAncestors = getForeachAncestorIds(depId, workflow, cache, stack);
+    for (const ancestorId of depAncestors) {
+      if (!ordered.includes(ancestorId)) ordered.push(ancestorId);
+    }
+    const depStep = workflow.steps.find((s) => s.id === depId);
+    if (toPlain(depStep)?.type === "foreach" && !ordered.includes(depId)) {
+      ordered.push(depId);
+    }
+  }
+
+  stack.delete(stepId);
+  if (cache) cache.set(stepId, ordered);
+  return ordered;
 }
 
 /**
@@ -427,18 +558,14 @@ function isStepInsideLoop(stepId, loopStepId, workflow) {
 function isLoopIterationDone(run, loopStepId, iteration, workflow, opts = {}) {
   const steps = workflow.steps || [];
   const continueOnError = opts.continueOnError === true;
+  const dependencyModeCache = opts.dependencyModeCache ?? new Map();
 
-  const inIteration = new Set();
-  function addDescendants(stepId) {
-    if (inIteration.has(stepId)) return;
-    inIteration.add(stepId);
-    for (const s of steps) {
-      if (s.dependsOn?.includes(stepId)) addDescendants(s.id);
-    }
-  }
-  for (const s of steps) {
-    if (s.dependsOn?.includes(loopStepId)) addDescendants(s.id);
-  }
+  const inIteration = new Set(
+    steps
+      .map((s) => toPlain(s))
+      .filter((s) => s.id !== loopStepId && isStepInsideLoop(s.id, loopStepId, workflow, dependencyModeCache))
+      .map((s) => s.id)
+  );
 
   if (!inIteration.size) return true;
 
@@ -464,7 +591,10 @@ async function handleIfStepDAG({ workflow, run, stepIndex, iteration = 0, io }) 
   const thenGoto = step.params?.thenGoto;
   const elseGoto = step.params?.elseGoto;
 
-  const ctx = buildContext(run, iteration ?? 0);
+  const ctx = buildContext(run, iteration ?? 0, {
+    workflow,
+    currentStepId: stepId
+  });
   const ok = evalCondition(conditionExpr, ctx);
 
   await addRunLog(
@@ -560,6 +690,7 @@ async function dispatchReadySteps({
 
   const workflow = run.workflowSnapshot;
   if (!workflow || !workflow.steps?.length) return;
+  const dependencyModeCache = new Map();
 
   // Control steps (e.g. foreach) are orchestrator-internal and should not consume
   // worker parallel slots; counting them can deadlock low maxParallel workflows.
@@ -589,17 +720,24 @@ async function dispatchReadySteps({
     // (they depend on the foreach). Steps before the loop (e.g. HTTP) must stay at iteration 0.
     if (stepPlain.type !== "foreach") {
       if (run.loopContext?.loopStepId) {
-        if (isStepInsideLoop(stepPlain.id, run.loopContext.loopStepId, workflow)) {
+        if (isStepInsideLoop(stepPlain.id, run.loopContext.loopStepId, workflow, dependencyModeCache)) {
           const ls = getLoopState(run, run.loopContext.loopStepId);
           iteration = ls?.index ?? run.loopContext?.index ?? 0;
           activeLoopStepIdForDeps = run.loopContext.loopStepId;
         }
       } else {
-        const parentLoop = workflow.steps.find(s =>
-          s.id !== stepPlain.id &&
-          stepPlain.dependsOn?.includes(s.id) &&
-          s.type === "foreach"
-        );
+        const parentLoop = workflow.steps.find((s) => {
+          if (s.id === stepPlain.id || s.type !== "foreach") return false;
+          if (!stepPlain.dependsOn?.includes(s.id)) return false;
+          return (
+            getDependencyMode({
+              stepPlain,
+              depId: s.id,
+              workflow,
+              dependencyModeCache
+            }) === "iteration"
+          );
+        });
 
         if (parentLoop) {
           iteration = (getLoopState(run, parentLoop.id)?.index ?? 0);
@@ -611,7 +749,7 @@ async function dispatchReadySteps({
         const loopIds = ls instanceof Map ? [...ls.keys()] : (ls ? Object.keys(ls) : []);
         if (!run.loopContext?.loopStepId && loopIds.length > 0) {
           const insideFinishedLoop = loopIds.some(
-            loopId => isStepInsideLoop(stepPlain.id, loopId, workflow)
+            loopId => isStepInsideLoop(stepPlain.id, loopId, workflow, dependencyModeCache)
           );
           if (insideFinishedLoop) continue;
         }
@@ -677,7 +815,7 @@ async function dispatchReadySteps({
         iteration
       });
 
-      if (depsSatisfied(run, stepPlain.dependsOn, iteration, activeLoopStepIdForDeps, stepPlain, workflow)) {
+      if (depsSatisfied(run, stepPlain.dependsOn, iteration, activeLoopStepIdForDeps, stepPlain, workflow, dependencyModeCache)) {
 
         // IF koşulu loop.item ile değerlendiriliyor; loopContext güncel olmalı
         const runForIf = await Run.findById(runId);
@@ -726,7 +864,7 @@ async function dispatchReadySteps({
         iteration: 0
       });
 
-      if (!depsSatisfied(run, stepPlain.dependsOn, 0, null, stepPlain, workflow)) continue;
+      if (!depsSatisfied(run, stepPlain.dependsOn, 0, null, stepPlain, workflow, dependencyModeCache)) continue;
 
       let loopState = getLoopState(run, stepPlain.id);
       let items;
@@ -736,7 +874,11 @@ async function dispatchReadySteps({
 
       if (!loopState) {
 
-        const context = buildContext(run);
+        const context = buildContext(run, iteration, {
+          workflow,
+          currentStepId: stepPlain.id,
+          activeLoopStepId: run.loopContext?.loopStepId ?? activeLoopStepIdForDeps ?? null
+        });
         items = coerceForeachItems(resolveVariables(stepPlain.params?.items, context));
         if (!Array.isArray(items)) {
           const type = items === null ? "null" : Array.isArray(items) ? "array" : typeof items;
@@ -1060,7 +1202,8 @@ const depsOk = depsSatisfied(
   loopIteration,
   loopStepId,
   stepPlain,
-  workflow
+  workflow,
+  dependencyModeCache
 );
 
     if (depsOk) {
@@ -1173,7 +1316,11 @@ const depsOk = depsSatisfied(
     const stepIteration = item.iteration ?? 0;
     const resolvedParams = resolveVariables(
       stepPlain.params ?? {},
-      buildContext(run, stepIteration)
+      buildContext(run, stepIteration, {
+        workflow,
+        currentStepId: stepPlain.id,
+        activeLoopStepId: item.loopStepId ?? null
+      })
     );
 
     await persistStepExecutionInput(runId, stepPlain.id, stepIteration, executionId, resolvedParams);
@@ -1489,7 +1636,8 @@ function getStepOutputForContext(outputs, stepId, iteration = undefined) {
   return raw;
 }
 
-function buildContext(run, iterationOverride = undefined) {
+function buildContext(run, iterationOverride = undefined, options = {}) {
+  const { workflow = null, currentStepId = null, activeLoopStepId = null } = options;
   const outputsRaw =
     run.outputs instanceof Map
       ? Object.fromEntries(run.outputs)
@@ -1508,8 +1656,33 @@ function buildContext(run, iterationOverride = undefined) {
   }
 
   const loopCtx = run.loopContext || {};
+  const loops = {};
   let effectiveLoop = loopCtx;
-  if (iterationOverride != null && loopCtx.loopStepId) {
+
+  let ancestorLoopIds = [];
+  if (workflow && currentStepId) {
+    ancestorLoopIds = getForeachAncestorIds(currentStepId, workflow);
+  }
+  if (!ancestorLoopIds.length && activeLoopStepId) {
+    ancestorLoopIds = [activeLoopStepId];
+  }
+
+  for (let i = 0; i < ancestorLoopIds.length; i++) {
+    const loopStepId = ancestorLoopIds[i];
+    const ls = getLoopState(run, loopStepId);
+    if (!ls) continue;
+    const isInnermost = i === ancestorLoopIds.length - 1;
+    const index = isInnermost && iterationOverride != null
+      ? iterationOverride
+      : (ls.index ?? 0);
+    const item = Array.isArray(ls.items) ? ls.items[index] ?? null : null;
+    loops[loopStepId] = { loopStepId, index, item };
+  }
+
+  if (ancestorLoopIds.length > 0) {
+    const innermostLoopId = ancestorLoopIds[ancestorLoopIds.length - 1];
+    effectiveLoop = loops[innermostLoopId] ?? loopCtx;
+  } else if (iterationOverride != null && loopCtx.loopStepId) {
     const ls = getLoopState(run, loopCtx.loopStepId);
     const item = Array.isArray(ls?.items) ? ls.items[iterationOverride] ?? null : null;
     effectiveLoop = { ...loopCtx, index: iterationOverride, item };
@@ -1520,7 +1693,8 @@ function buildContext(run, iterationOverride = undefined) {
     run,
     trigger: run.triggerPayload || {},
     env: process.env,
-    loop: effectiveLoop
+    loop: effectiveLoop,
+    loops
   };
 }
 
@@ -2605,7 +2779,14 @@ export async function startOrchestrator({ io }) {
     emitRunUpdate(updatedRun, io);
 
     const previousOutput = getPreviousOutput(updatedRun, stepPlain, iteration);
-    const resolvedParams = resolveVariables(stepPlain.params ?? {}, buildContext(updatedRun, iteration));
+    const resolvedParams = resolveVariables(
+      stepPlain.params ?? {},
+      buildContext(updatedRun, iteration, {
+        workflow: updatedRun?.workflowSnapshot ?? null,
+        currentStepId: stepPlain.id,
+        activeLoopStepId: loopStepId ?? null
+      })
+    );
 
     await persistStepExecutionInput(runId, stepPlain.id, iteration, executionId, resolvedParams);
 
@@ -2650,7 +2831,7 @@ export async function startOrchestrator({ io }) {
           stepIndex,
           executionId,
           globalToken,
-          iteration,
+          iteration
         })),
         { expiration: String(stepPlain.timeout), persistent: true }
       );
@@ -2788,3 +2969,10 @@ export async function startOrchestrator({ io }) {
   }, 1000);
   logInfo("orchestrator.start", { message: "Orchestrator running (enterprise mode)" });
 }
+
+export const __test__ = {
+  depsSatisfied,
+  getDependencyMode,
+  inferDependencyMode,
+  isStepInsideLoop,
+};

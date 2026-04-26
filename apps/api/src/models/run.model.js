@@ -11,6 +11,11 @@ const stepSchema = new mongoose.Schema({
   retry: { type: Number, default: 0 },
   retryDelay: { type: Number },
   dependsOn: { type: [String], default: [] },
+  dependencyModes: {
+    type: Map,
+    of: { type: String, enum: ["iteration", "barrier"] },
+    default: {}
+  },
   branch: { type: String },
   errorFrom: { type: String },
   timeout: { type: Number, default: 0 },
@@ -157,4 +162,8 @@ runSchema.index({ createdAt: -1 });
 runSchema.index({ "stepStates.stepId": 1,
                   "stepStates.iteration": 1
 });
-export const Run = mongoose.model("Run", runSchema);
+export function getRunModel(conn = mongoose.connection) {
+  return conn.models.Run || conn.model("Run", runSchema);
+}
+
+export const Run = getRunModel();

@@ -11,7 +11,7 @@ export type VariableTreeNode = {
   children?: VariableTreeNode[];
 };
 
-type StepsInput = { id: string }[];
+type StepsInput = { id: string; type?: string }[];
 type RunOutputsByStep = Record<string, unknown>;
 
 /**
@@ -21,13 +21,15 @@ type RunOutputsByStep = Record<string, unknown>;
  * - "trigger.payload"                  -> { kind: "trigger", segments: ["payload"] }
  * - "steps.fetchPost.output.title"     -> { kind: "step", stepId: "fetchPost", segments: ["output", "title"] }
  * - "loop.item"                        -> { kind: "loop", segments: ["item"] }
+ * - "loops.outerLoop.item"             -> { kind: "loops", loopStepId: "outerLoop", segments: ["item"] }
  * - "run.id"                           -> { kind: "run",  segments: ["id"] }
  */
-export type VariablePathKind = "trigger" | "step" | "loop" | "run" | "error";
+export type VariablePathKind = "trigger" | "step" | "loop" | "loops" | "run" | "error";
 
 export type VariablePath = {
   kind: VariablePathKind;
   stepId?: string;
+  loopStepId?: string;
   segments: string[];
 };
 
@@ -71,6 +73,15 @@ export function parseVariablePath(expr: string): VariablePath | null {
     return {
       kind: "loop",
       segments: parts.slice(1),
+    };
+  }
+
+  // loops.loopStepId.item / loops.loopStepId.index
+  if (parts[0] === "loops" && parts.length >= 2) {
+    return {
+      kind: "loops",
+      loopStepId: parts[1],
+      segments: parts.slice(2),
     };
   }
 
@@ -183,6 +194,19 @@ export function validateVariable(
     }
   }
 
+  if (parsed.kind === "loops") {
+    const allowed = new Set(["item", "index"]);
+    if (!parsed.loopStepId) {
+      return { valid: true, warning: "loops variables require a loop step id (loops.<loopStepId>.item)." };
+    }
+    if (!stepIds.has(parsed.loopStepId)) {
+      return { valid: true, warning: `Loop step "${parsed.loopStepId}" not found (may exist at runtime)` };
+    }
+    if (parsed.segments.length === 0 || !allowed.has(parsed.segments[0])) {
+      return { valid: true, warning: "Loop variables usually use loops.<loopStepId>.item or loops.<loopStepId>.index." };
+    }
+  }
+
   return { valid: true };
 }
 
@@ -196,6 +220,8 @@ export function formatVariablePath(path: VariablePath): string {
       return ["trigger", ...path.segments].join(".");
     case "loop":
       return ["loop", ...path.segments].join(".");
+    case "loops":
+      return ["loops", path.loopStepId ?? "", ...path.segments].filter(Boolean).join(".");
     case "run":
       return ["run", ...path.segments].join(".");
     case "step":
@@ -244,6 +270,26 @@ export function validateVariablePath(
 
   if (parsed.kind === "loop") {
     const allowedLoopSegments = new Set(["item", "index"]);
+    if (parsed.segments.length === 0 || !allowedLoopSegments.has(parsed.segments[0])) {
+      return {
+        ok: false,
+        error: `Loop variables must start with "item" or "index" (got "${expr}").`,
+      };
+    }
+  }
+
+  if (parsed.kind === "loops") {
+    const allowedLoopSegments = new Set(["item", "index"]);
+    if (!parsed.loopStepId) {
+      return { ok: false, error: `Loop variables must include loop step id (got "${expr}").` };
+    }
+    const loopStep = context.steps.find((s) => s.id === parsed.loopStepId);
+    if (!loopStep) {
+      return { ok: false, error: `Unknown loop step "${parsed.loopStepId}" in variable "${expr}".` };
+    }
+    if (loopStep.type !== "foreach") {
+      return { ok: false, error: `Step "${parsed.loopStepId}" is not a foreach loop in "${expr}".` };
+    }
     if (parsed.segments.length === 0 || !allowedLoopSegments.has(parsed.segments[0])) {
       return {
         ok: false,
@@ -414,6 +460,20 @@ export function getVariableTree(
       { name: "index", path: "loop.index" },
     ],
   });
+
+  const foreachStepIds = steps.filter((s) => s.type === "foreach").map((s) => s.id);
+  if (foreachStepIds.length > 0) {
+    roots.push({
+      name: "loops",
+      children: foreachStepIds.map((loopStepId) => ({
+        name: loopStepId,
+        children: [
+          { name: "item", path: `loops.${loopStepId}.item` },
+          { name: "index", path: `loops.${loopStepId}.index` },
+        ],
+      })),
+    });
+  }
 
   roots.push({
     name: "run",

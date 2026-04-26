@@ -1,11 +1,15 @@
 import express from "express";
-import { Workflow } from "../models/workflow.model.js";
-import { Run } from "../models/run.model.js";
 import { channel } from "../config/rabbit.js";
 import { registerCronWorkflow, stopCronWorkflow  } from "../config/scheduler.js";
-import { validateWorkflowPayload } from "../utils/validateWorkflow.js";
+import {
+  normalizeWorkflowSteps,
+  validateWorkflowGraph,
+  validateWorkflowPayload
+} from "../utils/validateWorkflow.js";
 import { workflowVersionDiff } from "../utils/workflowDiff.js";
+import { getPlatformModels } from "../utils/tenantModels.js";
 const router = express.Router();
+const modelsOf = () => getPlatformModels();
 const ownedWorkflowQuery = (req, id) => ({ _id: id, userId: req.user.id });
 
 
@@ -13,6 +17,7 @@ const ownedWorkflowQuery = (req, id) => ({ _id: id, userId: req.user.id });
 
 router.get("/:id/versions/diff", async (req, res) => {
   try {
+    const { Workflow } = modelsOf(req);
     const fromV = Number(req.query.from);
     const toV = Number(req.query.to);
     if (!Number.isInteger(fromV) || !Number.isInteger(toV)) {
@@ -35,6 +40,7 @@ router.get("/:id/versions/diff", async (req, res) => {
 
 router.get("/:id/versions", async (req, res) => {
   try {
+    const { Workflow } = modelsOf(req);
     const wf = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
     if (!wf) return res.status(404).json({ error: "Workflow not found" });
 
@@ -56,6 +62,7 @@ router.get("/:id/versions", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
+    const { Workflow } = modelsOf(req);
     const wf = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
     if (!wf) return res.status(404).json({ error: "Not found" });
 
@@ -80,6 +87,7 @@ router.get("/:id", async (req, res) => {
  */
 router.get("/:id/steps/:stepId/output-preview", async (req, res) => {
   try {
+    const { Run } = modelsOf(req);
     const { id: workflowId, stepId } = req.params;
     const run = await Run.findOne({
       userId: req.user.id,
@@ -113,8 +121,9 @@ router.get("/:id/steps/:stepId/output-preview", async (req, res) => {
 });
 
 router.get("/", async (req, res) => {
+  const { Workflow } = modelsOf(req);
   const workflows = await Workflow.find({ userId: req.user.id }).sort({ createdAt: -1 });
-
+  console.log("veriler geldi.",workflows)
   res.json(
     workflows.map(w => ({
       id: w._id.toString(),
@@ -131,6 +140,7 @@ router.get("/", async (req, res) => {
 
 router.post("/:id/rollback/:version", async (req, res) => {
   try {
+    const { Workflow } = modelsOf(req);
     const { id, version } = req.params;
     const targetVersion = Number(version);
     const wf = await Workflow.findOne(ownedWorkflowQuery(req, id));
@@ -210,6 +220,7 @@ router.post("/:id/rollback/:version", async (req, res) => {
  */
 router.post("/:id/run", async (req, res) => {
   try {
+    const { Workflow, Run } = modelsOf(req);
     const workflow = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
 
     if (!workflow) {
@@ -234,12 +245,37 @@ router.post("/:id/run", async (req, res) => {
       return res.status(400).json({ error: "triggerPayload must be an object" });
     }
 
+    const selectedVersionSnapshot =
+      workflowVersion === workflow.currentVersion
+        ? null
+        : workflow.versions?.find((ver) => ver.version === workflowVersion) ?? null;
+    const snapshotSteps = (selectedVersionSnapshot?.steps ?? workflow.steps ?? []).map((step) => ({
+      id: step.id,
+      type: step.type,
+      params: step.params ?? {},
+      retry: step.retry ?? 0,
+      retryDelay: step.retryDelay,
+      dependsOn: Array.isArray(step.dependsOn) ? step.dependsOn : [],
+      dependencyModes: step.dependencyModes ?? {},
+      branch: step.branch,
+      errorFrom: step.errorFrom,
+      timeout: step.timeout ?? 0,
+      disabled: Boolean(step.disabled),
+    }));
+    const snapshotMaxParallel = selectedVersionSnapshot?.maxParallel ?? workflow.maxParallel ?? 5;
+
     const run = await Run.create({
       userId: req.user.id,
       workflowId: workflow._id,
       workflowVersion,
       status: "queued",
-      triggerPayload: triggerPayloadRaw ?? undefined
+      triggerPayload: triggerPayloadRaw ?? undefined,
+      workflowSnapshot: {
+        version: workflowVersion,
+        maxParallel: snapshotMaxParallel,
+        onErrorStepId: workflow.onErrorStepId,
+        steps: snapshotSteps,
+      },
     });
 
     // RabbitMQ'ya mesaj atıyoruz
@@ -327,6 +363,7 @@ router.post("/:id/run", async (req, res) => {
  */
 router.post("/", async (req, res) => {
   try {
+    const { Workflow } = modelsOf(req);
 
     const validated = validateWorkflowPayload(req.body);
 
@@ -389,6 +426,7 @@ router.post("/", async (req, res) => {
  */
 router.post("/:id/validate-variables", async (req, res) => {
   try {
+    const { Workflow } = modelsOf(req);
     const { id } = req.params;
     const wf = await Workflow.findOne(ownedWorkflowQuery(req, id)).lean();
     if (!wf) return res.status(404).json({ error: "Workflow not found" });
@@ -422,7 +460,7 @@ router.post("/:id/validate-variables", async (req, res) => {
 
           // Basic root validation
           const root = parts[0];
-          if (!["trigger", "steps", "loop", "run", "error"].includes(root)) {
+          if (!["trigger", "steps", "loop", "loops", "run", "error"].includes(root)) {
             vars.push({ path: expr, ok: false, error: `Unknown root "${root}" in variable "${expr}"` });
             continue;
           }
@@ -443,6 +481,18 @@ router.post("/:id/validate-variables", async (req, res) => {
             const seg = parts[1];
             if (!["item", "index"].includes(seg || "")) {
               vars.push({ path: expr, ok: false, error: `Loop variable must start with item or index in "${expr}"` });
+              continue;
+            }
+          }
+          if (root === "loops") {
+            const loopStepId = parts[1];
+            const seg = parts[2];
+            if (!loopStepId || !stepIds.has(loopStepId)) {
+              vars.push({ path: expr, ok: false, error: `Unknown loop step "${loopStepId || ""}" in "${expr}"` });
+              continue;
+            }
+            if (!["item", "index"].includes(seg || "")) {
+              vars.push({ path: expr, ok: false, error: `loops variable must start with item or index in "${expr}"` });
               continue;
             }
           }
@@ -507,6 +557,7 @@ router.post("/:id/validate-variables", async (req, res) => {
  */
 router.put("/:id", async (req, res) => {
   try {
+    const { Workflow } = modelsOf(req);
     const workflow = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
     if (!workflow) {
       return res.status(404).json({ error: "Workflow not found" });
@@ -546,9 +597,24 @@ router.put("/:id", async (req, res) => {
       v => v.version === workflow.currentVersion
     );
 
+    const normalizedIncomingSteps =
+      steps !== undefined ? normalizeWorkflowSteps(Array.isArray(steps) ? steps : []) : undefined;
+    if (normalizedIncomingSteps !== undefined) {
+      if (!Array.isArray(steps)) {
+        return res.status(400).json({ error: "Steps must be an array" });
+      }
+      for (const step of normalizedIncomingSteps) {
+        if (!step.id) return res.status(400).json({ error: "Step id is required" });
+        if (!step.type) return res.status(400).json({ error: `Step ${step.id} missing type` });
+      }
+      if (normalizedIncomingSteps.length > 0) {
+        validateWorkflowGraph(normalizedIncomingSteps);
+      }
+    }
+
     const stepsChanged =
-      steps !== undefined &&
-      JSON.stringify(steps) !== JSON.stringify(currentDef.steps);
+      normalizedIncomingSteps !== undefined &&
+      JSON.stringify(normalizedIncomingSteps) !== JSON.stringify(currentDef.steps);
 
     const parallelChanged =
       maxParallel !== undefined &&
@@ -557,7 +623,7 @@ router.put("/:id", async (req, res) => {
     if (stepsChanged || parallelChanged) {
       const nextVersion = workflow.currentVersion + 1;
 
-      const nextSteps = stepsChanged ? steps : currentDef.steps;
+      const nextSteps = stepsChanged ? normalizedIncomingSteps : currentDef.steps;
       const nextParallel = parallelChanged ? maxParallel : currentDef.maxParallel;
 
       workflow.versions.push({
@@ -601,6 +667,7 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
+    const { Workflow } = modelsOf(req);
     const workflow = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id));
     if (!workflow) {
       return res.status(404).json({ error: "Workflow not found" });

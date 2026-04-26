@@ -1,7 +1,7 @@
 import express from "express";
 import bcrypt from "bcryptjs";
-import { User } from "../models/user.model.js";
 import { requireAuth, signAccessToken, signRefreshToken } from "../middleware/auth.js";
+import { User } from "../models/user.model.js";
 
 const router = express.Router();
 
@@ -40,7 +40,12 @@ router.post("/login", async (req, res) => {
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user);
     return res.json({
-      user: { id: user._id.toString(), email: user.email, name: user.name, role: user.role },
+      user: {
+        id: user._id.toString(),
+        email: user.email,
+        name: user.name,
+        role: user.role
+      },
       accessToken,
       refreshToken
     });
@@ -52,7 +57,12 @@ router.post("/login", async (req, res) => {
 router.get("/me", requireAuth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
   if (!user) return res.status(404).json({ error: "User not found" });
-  return res.json({ id: user._id.toString(), email: user.email, name: user.name, role: user.role });
+  return res.json({
+    id: user._id.toString(),
+    email: user.email,
+    name: user.name,
+    role: user.role
+  });
 });
 
 export default router;

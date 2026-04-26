@@ -9,4 +9,8 @@ const templateSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-export const Template = mongoose.model("Template", templateSchema);
+export function getTemplateModel(conn = mongoose.connection) {
+  return conn.models.Template || conn.model("Template", templateSchema);
+}
+
+export const Template = getTemplateModel();

@@ -1,11 +1,13 @@
 import express from "express";
 import mongoose from "mongoose";
-import { TelegramEvent } from "../models/telegramEvent.model.js";
+import { getPlatformModels } from "../utils/tenantModels.js";
 
 const router = express.Router();
+const modelsOf = () => getPlatformModels();
 
 router.get("/events", async (req, res) => {
   try {
+    const { TelegramEvent } = modelsOf(req);
     const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 200);
     const q = { userId: req.user.id };
 

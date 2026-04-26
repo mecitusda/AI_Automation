@@ -13,6 +13,14 @@ function buildGraph(steps) {
   return { graph, stepIds };
 }
 
+function normalizeDependencyModesObject(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  if (raw instanceof Map) {
+    return Object.fromEntries(raw.entries());
+  }
+  return { ...raw };
+}
+
 /**
  * Detect cycle in dependency graph using DFS.
  * @returns {string[]} list of step ids in a cycle, or empty if acyclic
@@ -82,6 +90,37 @@ export function validateWorkflowGraph(steps) {
       }
     }
   }
+  const byId = new Map(steps.map((s) => [s.id, s]));
+  for (const step of steps) {
+    const dependsOn = Array.isArray(step.dependsOn) ? step.dependsOn : [];
+    const dependencyModes = normalizeDependencyModesObject(step.dependencyModes);
+    for (const [depId, mode] of Object.entries(dependencyModes)) {
+      if (!dependsOn.includes(depId)) {
+        throw new Error(
+          `Step "${step.id}" has dependencyModes["${depId}"] but does not depend on "${depId}"`
+        );
+      }
+      if (mode !== "iteration" && mode !== "barrier") {
+        throw new Error(
+          `Step "${step.id}" has invalid dependency mode "${String(mode)}" for "${depId}"`
+        );
+      }
+      const depStep = byId.get(depId);
+      if (mode === "iteration" && depStep?.type !== "foreach") {
+        throw new Error(
+          `Step "${step.id}" can use iteration mode only for foreach dependency "${depId}"`
+        );
+      }
+    }
+  }
+}
+
+export function normalizeWorkflowSteps(steps) {
+  if (!Array.isArray(steps)) return [];
+  return steps.map((step) => ({
+    ...step,
+    dependencyModes: normalizeDependencyModesObject(step?.dependencyModes),
+  }));
 }
 
 /**
@@ -106,7 +145,8 @@ export function validateWorkflowPayload(body) {
   if (!Array.isArray(steps)) {
     throw new Error("Steps must be an array");
   }
-  for (const step of steps) {
+  const normalizedSteps = normalizeWorkflowSteps(steps);
+  for (const step of normalizedSteps) {
     if (!step.id) {
       throw new Error("Step id is required");
     }
@@ -118,13 +158,13 @@ export function validateWorkflowPayload(body) {
     }
   }
 
-  if (steps.length > 0) {
-    validateWorkflowGraph(steps);
+  if (normalizedSteps.length > 0) {
+    validateWorkflowGraph(normalizedSteps);
   }
 
   return {
     name: String(name),
-    steps,
+    steps: normalizedSteps,
     maxParallel: Number(maxParallel) || 5,
     trigger: trigger && typeof trigger === "object" ? trigger : { type: "manual" },
     enabled: Boolean(enabled)

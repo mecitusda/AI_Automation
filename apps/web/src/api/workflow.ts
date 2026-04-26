@@ -9,6 +9,16 @@ export type WorkflowSummary = {
   trigger: WorkflowTrigger | "manual" | "cron";
 };
 
+type WorkflowSummaryApiRow = {
+  id?: string;
+  _id?: string;
+  name?: string;
+  enabled?: boolean;
+  currentVersion?: number;
+  stepCount?: number;
+  trigger?: WorkflowSummary["trigger"];
+};
+
 export type WorkflowVersionInfo = {
   version: number;
   stepCount: number;
@@ -47,6 +57,7 @@ export type WorkflowDetail = {
     id: string;
     type: string;
     dependsOn?: string[];
+    dependencyModes?: Record<string, "iteration" | "barrier">;
     branch?: string;
     errorFrom?: string;
     retry?: number;
@@ -99,7 +110,30 @@ export async function startRun(
 }
 
 export function fetchWorkflows(): Promise<WorkflowSummary[]> {
-  return apiFetch<WorkflowSummary[]>("/workflows");
+  return apiFetch<unknown>("/workflows").then((raw) => {
+    if (!Array.isArray(raw)) {
+      throw new Error("Invalid /workflows response: expected an array");
+    }
+    
+    return raw.map((item) => {
+      if (!item || typeof item !== "object") {
+        throw new Error("Invalid /workflows response: item is not an object");
+      }
+      const row = item as WorkflowSummaryApiRow;
+      const id = String(row.id ?? row._id ?? "").trim();
+      if (!id) {
+        throw new Error("Invalid /workflows response: missing workflow id");
+      }
+      return {
+        id,
+        name: String(row.name ?? "Untitled"),
+        enabled: Boolean(row.enabled),
+        currentVersion: Number(row.currentVersion ?? 1),
+        stepCount: Number(row.stepCount ?? 0),
+        trigger: row.trigger ?? "manual",
+      } satisfies WorkflowSummary;
+    });
+  });
 }
 
 export type CreateWorkflowBody = {

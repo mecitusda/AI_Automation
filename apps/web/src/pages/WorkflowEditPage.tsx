@@ -157,6 +157,10 @@ const DEFAULT_PARAMS: Record<string, Record<string, unknown>> = {
   if: { condition: "{{ trigger.flag }}", thenGoto: "", elseGoto: "" },
   email: { to: "", subject: "", body: "" },
   slack: { channel: "", text: "" },
+  "db.set": { key: "", value: {} },
+  "db.get": { key: "" },
+  "db.delete": { key: "" },
+  "db.query": { keyPrefix: "", limit: 50 },
 };
 
 function stepsToNodesAndEdges(steps: WorkflowDetail["steps"]): { nodes: Node[]; edges: Edge[] } {
@@ -194,6 +198,7 @@ function stepsToNodesAndEdges(steps: WorkflowDetail["steps"]): { nodes: Node[]; 
         label: `${step.id} (${step.type})`,
         stepType: step.type,
         params: step.params ?? {},
+        dependencyModes: step.dependencyModes ?? {},
         retry: step.retry ?? 0,
         timeout: step.timeout ?? 0,
         disabled: step.disabled ?? false,
@@ -296,6 +301,18 @@ function getHandlesForStepType(pluginCatalog: PluginInfo[], stepType: string): P
   const plugin = pluginCatalog.find((p) => p.type === stepType);
   const handles = plugin?.handles ?? DEFAULT_HANDLES;
   return { ...handles, errorOutput: true };
+}
+
+function paramsContainLoopReference(params: Record<string, unknown> | undefined, loopStepId: string): boolean {
+  const escapedLoopId = loopStepId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [/\{\{\s*loop\./, new RegExp(`\\{\\{\\s*loops\\.${escapedLoopId}\\.`)];
+  const walk = (value: unknown): boolean => {
+    if (typeof value === "string") return patterns.some((p) => p.test(value));
+    if (Array.isArray(value)) return value.some((v) => walk(v));
+    if (value && typeof value === "object") return Object.values(value).some((v) => walk(v));
+    return false;
+  };
+  return walk(params);
 }
 
 function getAddStepOptions(pluginCatalog: PluginInfo[]): Record<"ai" | "data" | "control" | "utilities", NodeTypeDef[]> {
@@ -490,6 +507,7 @@ export default function WorkflowEditPage() {
           label: `${newId} (${stepType})`,
           stepType,
           params,
+          dependencyModes: {},
           retry: 0,
           timeout: 0,
           disabled: false,
@@ -531,12 +549,19 @@ export default function WorkflowEditPage() {
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
       const dependsOn = edges.filter((e) => e.target === node.id).map((e) => e.source);
-      const d = node.data as { stepType?: string; params?: Record<string, unknown>; retry?: number; timeout?: number };
+      const d = node.data as {
+        stepType?: string;
+        params?: Record<string, unknown>;
+        dependencyModes?: Record<string, "iteration" | "barrier">;
+        retry?: number;
+        timeout?: number;
+      };
       const params = buildEditingStepParams(node, d.params ?? {});
       setEditingStep({
         id: node.id,
         type: d.stepType ?? "log",
         params,
+        dependencyModes: d.dependencyModes ?? {},
         retry: d.retry ?? 0,
         timeout: d.timeout ?? 0,
         dependsOn,
@@ -550,12 +575,19 @@ export default function WorkflowEditPage() {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) return;
       const dependsOn = edges.filter((e) => e.target === nodeId).map((e) => e.source);
-      const d = node.data as { stepType?: string; params?: Record<string, unknown>; retry?: number; timeout?: number };
+      const d = node.data as {
+        stepType?: string;
+        params?: Record<string, unknown>;
+        dependencyModes?: Record<string, "iteration" | "barrier">;
+        retry?: number;
+        timeout?: number;
+      };
       const params = buildEditingStepParams(node, d.params ?? {});
       setEditingStep({
         id: node.id,
         type: d.stepType ?? "log",
         params,
+        dependencyModes: d.dependencyModes ?? {},
         retry: d.retry ?? 0,
         timeout: d.timeout ?? 0,
         dependsOn,
@@ -601,6 +633,7 @@ export default function WorkflowEditPage() {
         label: `${newId} (${stepType})`,
         stepType,
         params: { ...(d.params ?? {}) },
+        dependencyModes: {},
         retry: d.retry ?? 0,
         timeout: d.timeout ?? 0,
         disabled: false,
@@ -680,6 +713,7 @@ export default function WorkflowEditPage() {
               label: `${updated.id} (${updated.type})`,
               stepType: updated.type,
               params: updated.params ?? {},
+              dependencyModes: updated.dependencyModes ?? {},
               retry: updated.retry ?? 0,
               timeout: updated.timeout ?? 0,
             },
@@ -723,7 +757,14 @@ export default function WorkflowEditPage() {
 
   const buildSteps = useCallback((): WorkflowDetail["steps"] => {
     return nodes.map((node) => {
-      const d = node.data as { stepType?: string; params?: Record<string, unknown>; retry?: number; timeout?: number; disabled?: boolean };
+      const d = node.data as {
+        stepType?: string;
+        params?: Record<string, unknown>;
+        dependencyModes?: Record<string, "iteration" | "barrier">;
+        retry?: number;
+        timeout?: number;
+        disabled?: boolean;
+      };
       const incomingEdges = edges.filter((e) => e.target === node.id);
       const dependsOn = [...new Set(incomingEdges.map((e) => e.source))];
       const sourceNodeFromSwitch = incomingEdges.find((e) => {
@@ -736,6 +777,18 @@ export default function WorkflowEditPage() {
       const errorFrom = errorEdge?.source ?? undefined;
       const stepType = d.stepType ?? "log";
       let params = d.params ?? {};
+      const explicitModes = d.dependencyModes ?? {};
+      const dependencyModes = Object.fromEntries(
+        dependsOn
+          .map((depId) => {
+            const depNode = nodes.find((n) => n.id === depId);
+            const depType = (depNode?.data as { stepType?: string } | undefined)?.stepType;
+            if (depType !== "foreach") return null;
+            const mode = explicitModes[depId] ?? (paramsContainLoopReference(params, depId) ? "iteration" : "barrier");
+            return [depId, mode] as const;
+          })
+          .filter((row): row is readonly [string, "iteration" | "barrier"] => row !== null)
+      );
       if (stepType === "if") {
         const thenGoto = edges.find((e) => e.source === node.id && (e as { sourceHandle?: string }).sourceHandle === "true")?.target ?? "";
         const elseGoto = edges.find((e) => e.source === node.id && (e as { sourceHandle?: string }).sourceHandle === "false")?.target ?? "";
@@ -749,6 +802,7 @@ export default function WorkflowEditPage() {
         timeout: d.timeout ?? 0,
         disabled: d.disabled ?? false,
         dependsOn,
+        dependencyModes,
         ...(branch ? { branch } : {}),
         ...(errorFrom ? { errorFrom } : {}),
       };

@@ -53,4 +53,8 @@ telegramEventSchema.index(
 );
 telegramEventSchema.index({ executionId: 1, operation: 1, "telegram.chatId": 1, requestHash: 1 });
 
-export const TelegramEvent = mongoose.model("TelegramEvent", telegramEventSchema);
+export function getTelegramEventModel(conn = mongoose.connection) {
+  return conn.models.TelegramEvent || conn.model("TelegramEvent", telegramEventSchema);
+}
+
+export const TelegramEvent = getTelegramEventModel();

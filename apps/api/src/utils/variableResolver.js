@@ -1,7 +1,7 @@
 export function resolveVariables(obj, context) {
   const debugRun = process.env.DEBUG_RUN === "true";
 
-  const { steps, run, trigger, env, loop, error } = context;
+  const { steps, run, trigger, env, loop, loops, error } = context;
   
   function resolvePath(path) {
 
@@ -41,6 +41,9 @@ export function resolveVariables(obj, context) {
 
     } else if (root === "loop") {
       source = loop;
+
+    } else if (root === "loops") {
+      source = loops;
 
     } else {
       return "";

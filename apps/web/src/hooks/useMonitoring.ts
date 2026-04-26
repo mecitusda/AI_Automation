@@ -24,7 +24,7 @@ export function useMonitoring(enabled = true) {
     }
 
     load();
-    const interval = setInterval(load, 1000);
+    const interval = setInterval(load, 5000);
 
     return () => {
       mounted = false;

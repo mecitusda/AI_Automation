@@ -3,6 +3,7 @@ import express from "express";
 import { redis } from "../config/redis.js";
 import { Run } from "../models/run.model.js";
 import { channel } from "../config/rabbit.js";
+import { getApiPerfSnapshot } from "../utils/apiPerf.js";
 
 const router = express.Router();
 
@@ -90,8 +91,10 @@ router.get("/stuck", async (req, res) => {
   const runs = await Run.find({
     status: "running"
   })
+    .select({ createdAt: 1, stepStates: 1, logs: 1 })
     .sort({ createdAt: -1 })
-    .limit(limit);
+    .limit(limit)
+    .lean();
 
   const stuck = runs.filter((run) => {
     const age = now - new Date(run.createdAt).getTime();
@@ -172,6 +175,19 @@ router.post("/stuck/:runId/heal", async (req, res) => {
   );
 
   res.json({ ok: true });
+});
+
+router.get("/perf", async (_req, res) => {
+  try {
+    const snapshot = getApiPerfSnapshot();
+    res.json({
+      ok: true,
+      ts: Date.now(),
+      ...snapshot
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
 });
 
 export default router;

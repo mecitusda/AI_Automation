@@ -33,3 +33,26 @@ export async function healRun(runId: string) {
 export async function fetchMonitoring(): Promise<MonitoringSummary> {
   return apiFetch<MonitoringSummary>("/monitoring/summary");
 }
+
+export type MonitoringPerfRoute = {
+  route: string;
+  count: number;
+  errorCount: number;
+  avgMs: number;
+  p95Ms: number | null;
+  maxMs: number;
+  lastStatus: number | null;
+  lastTs: number | null;
+};
+
+export type MonitoringPerfResponse = {
+  ok: boolean;
+  ts: number;
+  slowThresholdMs: number;
+  routeCount: number;
+  routes: MonitoringPerfRoute[];
+};
+
+export async function fetchMonitoringPerf(): Promise<MonitoringPerfResponse> {
+  return apiFetch<MonitoringPerfResponse>("/monitoring/perf");
+}

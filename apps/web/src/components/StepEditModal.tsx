@@ -16,6 +16,7 @@ export type EditableStep = {
   retry?: number;
   timeout?: number;
   dependsOn?: string[];
+  dependencyModes?: Record<string, "iteration" | "barrier">;
 };
 
 type StepEditModalProps = {
@@ -35,6 +36,7 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
   const [params, setParams] = useState<Record<string, unknown>>({});
   const [retry, setRetry] = useState(0);
   const [timeoutMs, setTimeoutMs] = useState(0);
+  const [dependencyModes, setDependencyModes] = useState<Record<string, "iteration" | "barrier">>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [runOutputsByStep, setRunOutputsByStep] = useState<Record<string, unknown> | null>(null);
   const [pluginMeta, setPluginMeta] = useState<PluginInfo | null>(null);
@@ -43,11 +45,17 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
   const initialSnapshotRef = useRef("");
   const runData = useRunData();
 
-  const serializeStepDraft = (draftParams: Record<string, unknown>, draftRetry: number, draftTimeout: number) =>
+  const serializeStepDraft = (
+    draftParams: Record<string, unknown>,
+    draftRetry: number,
+    draftTimeout: number,
+    draftDependencyModes: Record<string, "iteration" | "barrier">
+  ) =>
     JSON.stringify({
       params: draftParams ?? {},
       retry: Number.isFinite(draftRetry) ? draftRetry : 0,
       timeout: Number.isFinite(draftTimeout) ? draftTimeout : 0,
+      dependencyModes: draftDependencyModes ?? {},
     });
   
   useEffect(() => {
@@ -55,10 +63,12 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
     const nextParams = step.params ?? {};
     const nextRetry = step.retry ?? 0;
     const nextTimeout = step.timeout ?? 0;
+    const nextDependencyModes = step.dependencyModes ?? {};
     setParams(nextParams);
     setRetry(nextRetry);
     setTimeoutMs(nextTimeout);
-    initialSnapshotRef.current = serializeStepDraft(nextParams, nextRetry, nextTimeout);
+    setDependencyModes(nextDependencyModes);
+    initialSnapshotRef.current = serializeStepDraft(nextParams, nextRetry, nextTimeout, nextDependencyModes);
     setErrors({});
     setRunOutputsByStep(null);
     setPluginMeta(null);
@@ -133,7 +143,11 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
     [stepErrorsFromWorkflow, errors]
   );
   const effectiveWarnings = stepWarningsFromWorkflow ?? {};
-  const isDirty = serializeStepDraft(params, retry, timeoutMs) !== initialSnapshotRef.current;
+  const isDirty = serializeStepDraft(params, retry, timeoutMs, dependencyModes) !== initialSnapshotRef.current;
+  const foreachDependencies = (step.dependsOn ?? []).filter((depId) => {
+    const dep = steps.find((s) => s.id === depId);
+    return dep?.type === "foreach";
+  });
 
   const requestClose = () => {
     if (isDirty) {
@@ -193,8 +207,14 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
       params: paramsWithSchemaDefaults,
       retry,
       timeout: timeoutMs,
+      dependencyModes: Object.fromEntries(
+        foreachDependencies.map((depId) => [
+          depId,
+          dependencyModes[depId] ?? "barrier"
+        ])
+      ) as Record<string, "iteration" | "barrier">,
     });
-    initialSnapshotRef.current = serializeStepDraft(paramsWithSchemaDefaults, retry, timeoutMs);
+    initialSnapshotRef.current = serializeStepDraft(paramsWithSchemaDefaults, retry, timeoutMs, dependencyModes);
     onClose();
   };
 
@@ -299,6 +319,31 @@ export default function StepEditModal({ step, steps = [], workflowId, pluginCata
             <div className="modalSection">
               <strong>Depends On:</strong> {step.dependsOn?.length ? step.dependsOn.join(", ") : "None"} (edit by connecting nodes)
             </div>
+            {foreachDependencies.length > 0 ? (
+              <div className="modalSection">
+                <strong>Foreach dependency mode</strong>
+                <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                  {foreachDependencies.map((depId) => (
+                    <label key={depId} style={{ display: "grid", gap: 4 }}>
+                      <span style={{ fontSize: 12, color: "#9ca3af" }}>{depId}</span>
+                      <select
+                        value={dependencyModes[depId] ?? "barrier"}
+                        onChange={(e) =>
+                          setDependencyModes((prev) => ({
+                            ...prev,
+                            [depId]: e.target.value === "iteration" ? "iteration" : "barrier",
+                          }))
+                        }
+                        style={{ width: 220, padding: "6px 8px" }}
+                      >
+                        <option value="barrier">After foreach completes</option>
+                        <option value="iteration">Per iteration</option>
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {pluginMeta?.credentials?.length ? (
               <div className="modalSection">

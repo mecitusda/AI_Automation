@@ -1,14 +1,15 @@
 import express from "express";
-import { Template } from "../models/template.model.js";
-import { Workflow } from "../models/workflow.model.js";
 import { validateWorkflowPayload } from "../utils/validateWorkflow.js";
 import { registerCronWorkflow } from "../config/scheduler.js";
 import { channel } from "../config/rabbit.js";
+import { getPlatformModels } from "../utils/tenantModels.js";
 
 const router = express.Router();
+const modelsOf = () => getPlatformModels();
 
 router.get("/", async (req, res) => {
   try {
+    const { Template } = modelsOf(req);
     const list = await Template.find({ userId: req.user.id }).select("name description category createdAt").lean();
     return res.json(
       list.map((d) => ({
@@ -26,6 +27,7 @@ router.get("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
+    const { Template } = modelsOf(req);
     const doc = await Template.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!doc) return res.status(404).json({ error: "Template not found" });
     return res.json({
@@ -43,6 +45,7 @@ router.get("/:id", async (req, res) => {
 
 router.post("/install/:id", async (req, res) => {
   try {
+    const { Template, Workflow } = modelsOf(req);
     const template = await Template.findOne({ _id: req.params.id, userId: req.user.id }).lean();
     if (!template) return res.status(404).json({ error: "Template not found" });
     const workflowPayload = template.workflow;

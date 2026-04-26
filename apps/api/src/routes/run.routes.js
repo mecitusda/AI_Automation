@@ -1,11 +1,12 @@
 import express from "express";
-import { Run } from "../models/run.model.js";
 import { channel } from "../config/rabbit.js";
 import { createReplayRun } from "../utils/runReplay.js";
-import { TelegramEvent } from "../models/telegramEvent.model.js";
+import { getPlatformModels } from "../utils/tenantModels.js";
 
 const router = express.Router();
+const modelsOf = () => getPlatformModels();
 const ownedRunQuery = (req, id) => ({ _id: id, userId: req.user.id });
+const detailDebugCounts = new Map();
 
 /** Mongoose Map in .lean() may be a plain object; support both. */
 function leanMapToRecord(value) {
@@ -19,8 +20,38 @@ function leanMapToRecord(value) {
   return {};
 }
 
+function normalizeStepForDetail(step) {
+  return {
+    id: step.id,
+    type: step.type,
+    retry: step.retry,
+    retryDelay: step.retryDelay,
+    timeout: step.timeout,
+    dependsOn: Array.isArray(step.dependsOn) ? step.dependsOn : [],
+    dependencyModes: leanMapToRecord(step.dependencyModes),
+    branch: step.branch,
+    errorFrom: step.errorFrom,
+    disabled: Boolean(step.disabled),
+    params: step.params || {},
+  };
+}
+
+function debugRunDetailTopology(runId, payload) {
+  if (process.env.NODE_ENV === "production") return;
+  const key = String(runId);
+  const nextCount = (detailDebugCounts.get(key) ?? 0) + 1;
+  if (nextCount > 60) return;
+  detailDebugCounts.set(key, nextCount);
+  console.log("[RunDetailTopologyDebug]", {
+    runId: key,
+    emit: nextCount,
+    ...payload,
+  });
+}
+
 router.post("/:id/replay", async (req, res) => {
   try {
+    const { Run } = modelsOf(req);
     const runId = req.params.id;
     const fromStepId = req.body?.fromStepId;
     const iteration = req.body?.iteration;
@@ -66,6 +97,7 @@ router.post("/:id/replay", async (req, res) => {
 
 router.get("/:id/summary", async (req, res) => {
   try {
+    const { Run } = modelsOf(req);
     const run = await Run.findOne(ownedRunQuery(req, req.params.id));
 
     if (!run) {
@@ -87,6 +119,7 @@ router.get("/:id/summary", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
+    const { Run } = modelsOf(req);
     const run = await Run.findOne(ownedRunQuery(req, req.params.id))
       .populate("workflowId", "name")
       .lean();
@@ -109,10 +142,19 @@ router.get("/:id", async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
+    const { Run } = modelsOf(req);
     const runs = await Run.find({ userId: req.user.id })
+      .select({
+        status: 1,
+        currentStepIndex: 1,
+        finishedAt: 1,
+        durationMs: 1,
+        stepStates: 1,
+        createdAt: 1
+      })
       .sort({ createdAt: -1 })
-      .limit(50);
-
+      .limit(50)
+      .lean();
     res.json(runs);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -121,6 +163,7 @@ router.get("/", async (req, res) => {
 
 router.post("/:id/cancel", async (req, res) => {
   try {
+    const { Run } = modelsOf(req);
     const runId = req.params.id;
     const run = await Run.findOne(ownedRunQuery(req, runId)).select({ _id: 1 }).lean();
     if (!run) {
@@ -151,21 +194,41 @@ router.post("/:id/cancel", async (req, res) => {
  */
 router.get("/:id/detail", async (req, res) => {
   try {
+    const { Run, Workflow, TelegramEvent } = modelsOf(req);
     const runId = req.params.id;
     const run = await Run.findOne(ownedRunQuery(req, runId)).lean();
     if (!run) {
       return res.status(404).json({ error: "Run not found" });
     }
-
-    const steps = (run.workflowSnapshot?.steps || []).map((s) => ({
-      id: s.id,
-      type: s.type,
-      retry: s.retry,
-      timeout: s.timeout,
-      dependsOn: s.dependsOn || [],
-      disabled: s.disabled || false,
-      params: s.params || {},
-    }));
+    let topologySteps = Array.isArray(run.workflowSnapshot?.steps) ? run.workflowSnapshot.steps : [];
+    let topologySource = "workflowSnapshot";
+    if (!topologySteps.length) {
+      topologySource = "workflowDoc";
+      const workflowDoc = await Workflow.findOne({ _id: run.workflowId, userId: req.user.id })
+        .select({ currentVersion: 1, versions: 1, steps: 1 })
+        .lean();
+      if (workflowDoc) {
+        const versionMatch = Array.isArray(workflowDoc.versions)
+          ? workflowDoc.versions.find((ver) => ver.version === run.workflowVersion)
+          : null;
+        if (versionMatch?.steps?.length) {
+          topologySource = "workflowDoc.version";
+          topologySteps = versionMatch.steps;
+        } else {
+          topologySource = "workflowDoc.current";
+          topologySteps = Array.isArray(workflowDoc.steps) ? workflowDoc.steps : [];
+        }
+      }
+    }
+    const steps = topologySteps.map(normalizeStepForDetail);
+    debugRunDetailTopology(runId, {
+      status: run.status,
+      workflowVersion: run.workflowVersion,
+      source: topologySource,
+      stepCount: steps.length,
+      stepStateCount: Array.isArray(run.stepStates) ? run.stepStates.length : 0,
+      logsCount: Array.isArray(run.logs) ? run.logs.length : 0,
+    });
 
     const stepStates = (run.stepStates || []).map((st) => ({
       stepId: st.stepId,
@@ -209,6 +272,7 @@ router.get("/:id/detail", async (req, res) => {
       finishedAt: run.finishedAt,
       durationMs: run.durationMs,
       workflowVersion: run.workflowVersion,
+      topologySource,
       steps,
       stepStates,
       outputs,
@@ -229,6 +293,7 @@ router.get("/:id/detail", async (req, res) => {
  */
 router.get("/:id/steps/:stepId/:iteration?", async (req, res) => {
   try {
+    const { Run } = modelsOf(req);
     const { id, stepId } = req.params;
     const iterationParam = req.params.iteration;
     const iteration = iterationParam !== undefined ? Number(iterationParam) : undefined;
