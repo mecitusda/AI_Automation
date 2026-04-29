@@ -292,6 +292,53 @@ router.post("/:id/run", async (req, res) => {
   }
 });
 
+router.post("/:id/duplicate", async (req, res) => {
+  try {
+    const { Workflow } = modelsOf(req);
+    const source = await Workflow.findOne(ownedWorkflowQuery(req, req.params.id)).lean();
+    if (!source) return res.status(404).json({ error: "Workflow not found" });
+
+    const requestedName = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    const steps = normalizeWorkflowSteps(source.steps || []);
+    const maxParallel = source.maxParallel ?? 5;
+    const duplicate = await Workflow.create({
+      userId: req.user.id,
+      name: requestedName || `${source.name} (copy)`,
+      enabled: false,
+      trigger: source.trigger ?? { type: "manual" },
+      steps,
+      maxParallel,
+      currentVersion: 1,
+      versions: [
+        {
+          version: 1,
+          steps,
+          maxParallel,
+          createdAt: new Date()
+        }
+      ]
+    });
+
+    await channel.publish(
+      "automation.direct",
+      "workflow.created",
+      Buffer.from(JSON.stringify({ workflowId: duplicate._id.toString() }))
+    );
+
+    res.status(201).json({
+      id: duplicate._id.toString(),
+      name: duplicate.name,
+      enabled: duplicate.enabled,
+      currentVersion: duplicate.currentVersion,
+      maxParallel: duplicate.maxParallel,
+      trigger: duplicate.trigger,
+      steps: duplicate.steps
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 /**
  * @swagger
  * /workflows:

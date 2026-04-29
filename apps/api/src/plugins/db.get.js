@@ -5,6 +5,22 @@ export default {
   label: "Data Store Get",
   category: "data",
   schema: [
+    {
+      key: "scope",
+      type: "select",
+      label: "Scope",
+      default: "workflow",
+      options: [
+        { value: "workflow", label: "Workflow" },
+        { value: "user", label: "User (shared across workflows)" }
+      ]
+    },
+    {
+      key: "collection",
+      type: "string",
+      label: "Collection",
+      placeholder: "news, customers"
+    },
     { key: "key", type: "string", label: "Key (exact)", required: true, placeholder: "customer.status" },
     { key: "defaultValue", type: "json", label: "Default value", placeholder: "null" }
   ],
@@ -12,6 +28,8 @@ export default {
     type: "object",
     properties: {
       key: { type: "string" },
+      scope: { type: "string" },
+      collection: { type: "string" },
       found: { type: "boolean" },
       value: {},
       valueType: { type: "string" }
@@ -25,7 +43,12 @@ export default {
     return err;
   },
   executor: async ({ params, context }) => {
-    const { WorkflowVariable, baseQuery } = getWorkflowVariableAccess(context);
+    const scope = String(params?.scope || "workflow");
+    const collection = String(params?.collection || "");
+    const { WorkflowVariable, baseQuery, scope: scopeInfo } = getWorkflowVariableAccess(context, {
+      scope,
+      collection
+    });
     const key = String(params.key).trim();
     const doc = await WorkflowVariable.findOne({ ...baseQuery, key }).lean();
     if (doc) {
@@ -36,6 +59,8 @@ export default {
       success: true,
       output: {
         key,
+        scope: scopeInfo.scope,
+        collection: scopeInfo.collection,
         found,
         value: found ? doc.value : params.defaultValue ?? null,
         valueType: found ? doc.valueType : null

@@ -32,6 +32,15 @@ export function signRefreshToken(user) {
   );
 }
 
+export function verifyRefreshToken(token) {
+  assertSecretsConfigured();
+  const payload = jwt.verify(token, REFRESH_SECRET);
+  if (payload?.type !== "refresh" || !payload?.sub) {
+    throw new Error("Invalid refresh token");
+  }
+  return payload;
+}
+
 export async function authOptional(req, _res, next) {
   try {
     const auth = req.headers.authorization;

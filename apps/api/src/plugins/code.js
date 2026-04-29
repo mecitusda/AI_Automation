@@ -1,6 +1,7 @@
 import vm from "vm";
 
 const DEFAULT_TIMEOUT_MS = 5000;
+const CODE_PLUGIN_ENABLED = process.env.CODE_PLUGIN_ENABLED !== "false";
 
 export default {
   type: "code",
@@ -17,6 +18,9 @@ export default {
   ],
   output: { type: "object" },
   executor: async ({ params, previousOutput }) => {
+    if (!CODE_PLUGIN_ENABLED) {
+      throw new Error("Code plugin is disabled by CODE_PLUGIN_ENABLED=false");
+    }
     const codeStr = params?.code;
     const timeoutMs = Math.min(Number(params?.timeoutMs) || DEFAULT_TIMEOUT_MS, 30000);
 

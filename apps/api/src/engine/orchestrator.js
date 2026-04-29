@@ -82,7 +82,7 @@ async function acquireGlobalSlot({ runId, stepId, executionId }) {
   const ok = await withRedisFallback(
     "orchestrator.acquire_global_slot",
     async () => redis.eval(ACQUIRE_LUA, 2, INF_KEY, TOK_SET, String(GLOBAL_MAX), token, String(TOK_TTL_MS)),
-    1
+    0
   );
   return ok === 1 ? token : null;
 }
@@ -580,6 +580,86 @@ function isLoopIterationDone(run, loopStepId, iteration, workflow, opts = {}) {
   return true;
 }
 
+async function skipEmptyForeachBody({ runId, workflow, loopStepId, iteration = 0, io, dependencyModeCache }) {
+  const steps = workflow.steps || [];
+  const loopBodyStepIds = steps
+    .map((s) => toPlain(s))
+    .filter((s) => s.id !== loopStepId && isStepInsideLoop(s.id, loopStepId, workflow, dependencyModeCache))
+    .map((s) => s.id);
+
+  if (!loopBodyStepIds.length) return;
+
+  const latestRun = await Run.findById(runId);
+  const stepStates = latestRun?.stepStates || [];
+  const loopBodyStepIdSet = new Set(loopBodyStepIds);
+  const existingInIteration = stepStates.filter((s) => (s.iteration ?? 0) === iteration);
+  const existingStepIds = new Set(existingInIteration.map((s) => s.stepId));
+  const pendingStepIds = existingInIteration
+    .filter((s) => loopBodyStepIdSet.has(s.stepId) && s.status === "pending")
+    .map((s) => s.stepId);
+  const missingStepIds = loopBodyStepIds.filter((stepId) => !existingStepIds.has(stepId));
+  const skippedStepIds = [...new Set([...pendingStepIds, ...missingStepIds])];
+
+  if (!skippedStepIds.length) return;
+
+  const now = new Date();
+  if (pendingStepIds.length) {
+    await Run.updateOne(
+      { _id: runId },
+      {
+        $set: {
+          "stepStates.$[s].status": "skipped",
+          "stepStates.$[s].finishedAt": now
+        }
+      },
+      {
+        arrayFilters: [
+          {
+            "s.stepId": { $in: pendingStepIds },
+            "s.iteration": iteration,
+            "s.status": "pending"
+          }
+        ]
+      }
+    );
+  }
+
+  if (missingStepIds.length) {
+    await Run.updateOne(
+      { _id: runId },
+      {
+        $push: {
+          stepStates: {
+            $each: missingStepIds.map((stepId) => ({
+              stepId,
+              iteration,
+              retryCount: 0,
+              status: "skipped",
+              finishedAt: now
+            }))
+          }
+        }
+      }
+    );
+  }
+
+  skippedStepIds.forEach((stepId) => emitStepUpdate(runId, stepId, iteration, "skipped", io));
+  await Promise.all(
+    skippedStepIds.map((stepId) =>
+      addRunLog(
+        runId,
+        {
+          stepId,
+          message: "Step skipped (empty foreach)",
+          createdAt: now,
+          level: "system"
+        },
+        io
+      )
+    )
+  );
+}
+
 
 async function handleIfStepDAG({ workflow, run, stepIndex, iteration = 0, io }) {
 
@@ -952,6 +1032,46 @@ async function dispatchReadySteps({
           return;
         }
 
+        // Empty foreach should not keep the run waiting forever.
+        // Complete it immediately so barrier dependents can proceed.
+        if (items.length === 0) {
+          const res = await Run.updateOne(
+            {
+              _id: runId,
+              stepStates: {
+                $elemMatch: {
+                  stepId: stepPlain.id,
+                  iteration: 0,
+                  status: { $in: ["pending", "running"] }
+                }
+              }
+            },
+            {
+              $set: {
+                [`loopState.${stepPlain.id}`]: {
+                  index: 0,
+                  items
+                },
+                "stepStates.$.status": "completed",
+                "stepStates.$.finishedAt": new Date()
+              },
+              $unset: {
+                loopContext: ""
+              }
+            }
+          );
+          if (res.modifiedCount > 0) emitStepUpdate(runId, stepPlain.id, 0, "completed", io);
+          await skipEmptyForeachBody({
+            runId,
+            workflow,
+            loopStepId: stepPlain.id,
+            iteration: 0,
+            io,
+            dependencyModeCache
+          });
+          return dispatchReadySteps({ runId, channel, resolveVariables, io });
+        }
+
         const initialLoopContext = {
           loopStepId: stepPlain.id,
           index: 0,
@@ -1084,8 +1204,18 @@ async function dispatchReadySteps({
         );
         if (res.modifiedCount > 0) {
           emitStepUpdate(runId, stepPlain.id, 0, "completed", io);
-          return dispatchReadySteps({ runId, channel, resolveVariables, io });
         }
+        if (items.length === 0) {
+          await skipEmptyForeachBody({
+            runId,
+            workflow,
+            loopStepId: stepPlain.id,
+            iteration: 0,
+            io,
+            dependencyModeCache
+          });
+        }
+        return dispatchReadySteps({ runId, channel, resolveVariables, io });
       }
 
       /* ITERATION DONE CHECK */

@@ -5,7 +5,9 @@ import {
   rollbackWorkflow,
   fetchWorkflowDetail,
   startRun,
-  fetchVersionDiff
+  fetchVersionDiff,
+  duplicateWorkflow,
+  exportWorkflowJson
 } from "../api/workflow";
 import type {
   WorkflowDetail,
@@ -16,8 +18,11 @@ import { getApiBaseUrl } from "../api/client";
 import WorkflowGraph from "../components/WorkflowGraph";
 import StepDetailModal from "../components/StepDetailModal";
 import { parseVariables } from "../utils/variableSystem";
+import { Button, useToast } from "../components/ui";
+import { useI18n } from "../hooks/useI18n";
 
 export default function WorkflowDetailPage() {
+  const { t } = useI18n();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -33,6 +38,8 @@ export default function WorkflowDetailPage() {
   const [diffResult, setDiffResult] = useState<VersionDiffResponse | null>(null);
   const [diffFrom, setDiffFrom] = useState<number>(1);
   const [diffTo, setDiffTo] = useState<number>(1);
+  const [duplicating, setDuplicating] = useState(false);
+  const { notify } = useToast();
   
   useEffect(() => {
   if (!id) return;
@@ -116,7 +123,7 @@ export default function WorkflowDetailPage() {
       });
       navigate(`/runs/${result.runId}`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to start run");
+      alert(err instanceof Error ? err.message : t("workflowDetail.startRun"));
     } finally {
       setRunLoading(false);
     }
@@ -161,22 +168,48 @@ export default function WorkflowDetailPage() {
       const result = await fetchVersionDiff(id, diffFrom, diffTo);
       setDiffResult(result);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to load diff");
+      alert(err instanceof Error ? err.message : t("workflowDetail.showDiff"));
+    }
+  };
+
+  const handleExport = () => {
+    if (!workflow) return;
+    const blob = new Blob([exportWorkflowJson(workflow)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${workflow.name.replace(/[^a-z0-9-_]+/gi, "-").toLowerCase() || "workflow"}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    notify(t("workflowDetail.exportJson"), "success");
+  };
+
+  const handleDuplicate = async () => {
+    if (!id || !workflow) return;
+    setDuplicating(true);
+    try {
+      const copy = await duplicateWorkflow(id);
+      notify(t("workflowDetail.duplicate"), "success");
+      navigate(`/workflows/${copy.id}/edit`);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : t("workflowDetail.duplicate"), "error");
+    } finally {
+      setDuplicating(false);
     }
   };
 
   if (loading) return <div className="pageLayout"><div className="spinner" /></div>;
 
-  if (!workflow) return <div className="pageLayout">Workflow not found</div>;
+  if (!workflow) return <div className="pageLayout">{t("workflowDetail.notFound")}</div>;
 
   return (
     <div className="pageLayout">
       {runInputOpen && (
         <div className="modalOverlay" onClick={() => setRunInputOpen(false)}>
           <div className="modalCard" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760 }}>
-            <h2 style={{ marginTop: 0 }}>Run input required</h2>
+            <h2 style={{ marginTop: 0 }}>{t("workflowDetail.runInputRequired")}</h2>
             <p className="subtle" style={{ marginBottom: 10 }}>
-              This workflow uses <code>trigger.*</code> variables. Provide trigger payload before starting run.
+              {t("workflowDetail.runInputHelp")}
             </p>
             <textarea
               value={runInputJson}
@@ -195,9 +228,9 @@ export default function WorkflowDetailPage() {
             />
             {runInputError ? <div className="credentialsError">{runInputError}</div> : null}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-              <button type="button" onClick={() => setRunInputOpen(false)}>Cancel</button>
+              <button type="button" onClick={() => setRunInputOpen(false)}>{t("common.cancel")}</button>
               <button type="button" onClick={handleConfirmRunWithInput} disabled={runLoading}>
-                {runLoading ? "Starting…" : "Start run"}
+                {runLoading ? t("workflowDetail.starting") : t("workflowDetail.startRun")}
               </button>
             </div>
           </div>
@@ -212,17 +245,21 @@ export default function WorkflowDetailPage() {
       <header className="pageHeader">
         <h1 className="title">{workflow.name}</h1>
         <div className="meta">
-          Current Version: <strong>v{workflow.currentVersion}</strong>
-          <button onClick={() => navigate(`/workflows/${id}/edit`)}>Edit</button>
-          <button onClick={() => handleStartRun()} disabled={runLoading}>
-            {runLoading ? "Starting…" : "Run"}
-          </button>
+          {t("workflowDetail.currentVersion")}: <strong>v{workflow.currentVersion}</strong>
+          <Button onClick={() => navigate(`/workflows/${id}/edit`)}>{t("workflowDetail.edit")}</Button>
+          <Button onClick={handleExport}>{t("workflowDetail.exportJson")}</Button>
+          <Button onClick={handleDuplicate} disabled={duplicating}>
+            {duplicating ? t("workflowDetail.duplicating") : t("workflowDetail.duplicate")}
+          </Button>
+          <Button variant="primary" onClick={() => handleStartRun()} disabled={runLoading}>
+            {runLoading ? t("workflowDetail.starting") : t("workflowDetail.run")}
+          </Button>
         </div>
       </header>
       <main className="pageContent">
       <div className="cards">
         <div className="card">
-          <h3>Workflow Graph</h3>
+          <h3>{t("workflowDetail.workflowGraph")}</h3>
           <WorkflowGraph steps={workflow.steps} onNodeClick={(step) => {
     setSelectedStep(step);
   }}/>
@@ -230,8 +267,8 @@ export default function WorkflowDetailPage() {
       <div className="card">
         <div className="row">
           <div className="status">
-            <div><strong>Status:</strong> {workflow.enabled ? "Enabled" : "Disabled"}</div>
-            <div><strong>Trigger:</strong>{" "}
+            <div><strong>{t("workflowDetail.status")}:</strong> {workflow.enabled ? t("workflowDetail.enabled") : t("workflowDetail.disabled")}</div>
+            <div><strong>{t("workflowDetail.trigger")}:</strong>{" "}
               {typeof workflow.trigger === "object" && workflow.trigger !== null
                 ? workflow.trigger.type === "cron"
                   ? `Cron${(workflow.trigger.cron || workflow.trigger.schedule)
@@ -248,7 +285,7 @@ export default function WorkflowDetailPage() {
 
       {typeof workflow.trigger === "object" && workflow.trigger !== null && workflow.trigger.type === "trigger.webhook" && id && (
         <div className="card">
-          <h3 className="card-title">Webhook URL</h3>
+          <h3 className="card-title">{t("workflowDetail.webhookUrl")}</h3>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <input
               type="text"
@@ -275,14 +312,14 @@ export default function WorkflowDetailPage() {
                 );
               }}
             >
-              Copy
+              {t("workflowDetail.copy")}
             </button>
           </div>
         </div>
       )}
 
       <div className="card">
-        <h3 className="card-title">Versions</h3>
+        <h3 className="card-title">{t("workflowDetail.versions")}</h3>
 
         <div style={{ marginBottom: 12 }}>
           <label>Diff: v</label>
@@ -297,7 +334,7 @@ export default function WorkflowDetailPage() {
               <option key={v.version} value={v.version}>v{v.version}</option>
             ))}
           </select>
-          <button onClick={handleShowDiff} disabled={diffFrom === diffTo}>Show diff</button>
+          <button onClick={handleShowDiff} disabled={diffFrom === diffTo}>{t("workflowDetail.showDiff")}</button>
           {diffResult && (
             <div style={{ marginTop: 12, padding: 8, background: "#1e293b", borderRadius: 8 }}>
               <div>Added: {diffResult.added.join(", ") || "—"}</div>
@@ -305,7 +342,7 @@ export default function WorkflowDetailPage() {
               {diffResult.changed.length > 0 && (
                 <div>Changed: {diffResult.changed.map((c) => `${c.stepId} (${c.changes.map((ch) => ch.field).join(", ")})`).join("; ")}</div>
               )}
-              <button onClick={() => setDiffResult(null)} style={{ marginTop: 8 }}>Close</button>
+              <button onClick={() => setDiffResult(null)} style={{ marginTop: 8 }}>{t("workflowDetail.close")}</button>
             </div>
           )}
         </div>
@@ -319,7 +356,7 @@ export default function WorkflowDetailPage() {
                 <strong>v{v.version}</strong>
                 {v.version === workflow.currentVersion && (
                   <span style={{ marginLeft: 8, color: "#4ade80" }}>
-                    (active)
+                    ({t("workflowDetail.active")})
                   </span>
                 )}
               </div>
@@ -327,7 +364,7 @@ export default function WorkflowDetailPage() {
               <div>
                 <span>Steps: {v.stepCount}</span>
                 <span style={{ marginLeft: 16 }}>
-                  MaxParallel: {v.maxParallel}
+                  {t("workflowDetail.maxParallel")}: {v.maxParallel}
                 </span>
               </div>
 
@@ -336,20 +373,20 @@ export default function WorkflowDetailPage() {
                   <button
                     onClick={() => handleRollback(v.version)}
                   >
-                    Rollback
+                    {t("workflows.rollback")}
                   </button>
                   <button
                     onClick={() => handleStartRun(v.version)}
                     disabled={runLoading}
                     style={{ marginLeft: 8 }}
                   >
-                    Run v{v.version}
+                    {t("workflowDetail.runVersion", { version: v.version })}
                   </button>
                 </>
               )}
               {v.version === workflow.currentVersion && (
                 <button onClick={() => handleStartRun(v.version)} disabled={runLoading} style={{ marginLeft: 8 }}>
-                  Run v{v.version}
+                  {t("workflowDetail.runVersion", { version: v.version })}
                 </button>
               )}
             </div>

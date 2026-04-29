@@ -43,11 +43,11 @@ export default function TemplatesPage() {
         <div className="meta">
           <Link to="/workflows">Workflows</Link>
           {" · "}
-          <Link to="/">Runs</Link>
+          <Link to="/runs">Runs</Link>
         </div>
       </header>
       <main className="pageContent">
-      <p style={{ marginBottom: 16 }}>
+      <p style={{ marginBottom: 16, fontSize: "1.6rem" }}>
         Start from a template and customize in the workflow builder.
       </p>
       <div className="cards">

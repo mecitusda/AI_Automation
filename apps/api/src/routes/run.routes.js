@@ -143,8 +143,22 @@ router.get("/:id", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { Run } = modelsOf(req);
-    const runs = await Run.find({ userId: req.user.id })
+    const limitRaw = Number(req.query.limit || 50);
+    const limit = Math.max(1, Math.min(100, Number.isFinite(limitRaw) ? limitRaw : 50));
+    const query = { userId: req.user.id };
+    if (typeof req.query.status === "string" && req.query.status && req.query.status !== "all") {
+      query.status = req.query.status;
+    }
+    if (typeof req.query.workflowId === "string" && req.query.workflowId && req.query.workflowId !== "all") {
+      query.workflowId = req.query.workflowId;
+    }
+    if (typeof req.query.cursor === "string" && req.query.cursor) {
+      query.createdAt = { $lt: new Date(req.query.cursor) };
+    }
+
+    const runs = await Run.find(query)
       .select({
+        workflowId: 1,
         status: 1,
         currentStepIndex: 1,
         finishedAt: 1,
@@ -153,9 +167,19 @@ router.get("/", async (req, res) => {
         createdAt: 1
       })
       .sort({ createdAt: -1 })
-      .limit(50)
+      .limit(limit + 1)
+      .populate("workflowId", "name")
       .lean();
-    res.json(runs);
+    const hasMore = runs.length > limit;
+    const items = hasMore ? runs.slice(0, limit) : runs;
+    if (req.query.format === "page") {
+      return res.json({
+        items,
+        nextCursor: hasMore ? items[items.length - 1]?.createdAt?.toISOString?.() ?? null : null,
+        hasMore
+      });
+    }
+    res.json(items);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -51,3 +51,9 @@ export function deleteCredential(id: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+export function testCredential(id: string): Promise<{ ok: boolean; message: string }> {
+  return apiFetch<{ ok: boolean; message: string }>(`/credentials/${encodeURIComponent(id)}/test`, {
+    method: "POST",
+  });
+}

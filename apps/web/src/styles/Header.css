@@ -9,12 +9,13 @@
   height: 100vh;
   min-height: 100vh;
   padding: 1.2rem 0;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
-  background: linear-gradient(180deg, #0f1117 0%, #0b0d13 55%, #090b10 100%);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   box-shadow: 1px 0 0 rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  
 }
 
 .appShell {
@@ -54,9 +55,9 @@
 .nav__brand {
   font-size: 16px;
   font-weight: 700;
-  color: #f3f7ff;
-  padding: 8px 10px 14px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  padding: 8px 10px 12px 20px;
+  border-bottom: 1px solid var(--border);
 }
 
 .nav__links {
@@ -93,7 +94,7 @@
   display: flex;
   align-items: center;
   font-size: 15px;
-  color: #d2d7e2;
+  color: var(--text);
   text-decoration: none;
   font-weight: 500;
   padding: 9px 12px;
@@ -103,15 +104,39 @@
 }
 
 .nav a:hover {
-  color: #f3f5fa;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  background: var(--surface-2);
 }
 
 .nav a.active {
-  color: #000000;
-  background: rgb(255, 255, 255);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.185);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
+
+.nav__prefs {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+
+.navControlBtn,
+.navControlSelect {
+  min-height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 4px 8px;
+  
+}
+
+.navControlSelect:focus{
+  outline: none;
+}
+
+
+
 
 .nav__logout {
   margin-top: 12px;
@@ -121,7 +146,7 @@
   border-radius: 10px;
   border: none!important;
   background: none!important;
-  color: #e6edf3!important;
+  color: var(--text)!important;
   display: inline!important;
   width: fit-content!important;
   align-self: center!important;
@@ -130,8 +155,8 @@
 /* Public shell: brand only (no redundant “Login” link — form has Sign in / Register) */
 .authHeader {
   flex-shrink: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: linear-gradient(180deg, #0f1117 0%, #0b0d13 55%, #090b10 100%);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
@@ -151,11 +176,11 @@
   font-size: 17px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #e6edf3;
+  color: var(--text);
 }
 
 .authHeader__tagline {
   font-size: 13px;
-  color: #8b949e;
+  color: var(--muted);
   font-weight: 500;
 }

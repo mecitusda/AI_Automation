@@ -109,6 +109,28 @@ export async function startRun(
   });
 }
 
+export async function duplicateWorkflow(id: string, name?: string): Promise<WorkflowDetail> {
+  const result = await apiFetch<{ id?: string; _id?: string }>(`/workflows/${id}/duplicate`, {
+    method: "POST",
+    body: JSON.stringify({ ...(name ? { name } : {}) }),
+  });
+  const duplicateId = result.id ?? result._id;
+  if (!duplicateId) throw new Error("Duplicate workflow did not return an id");
+  return fetchWorkflowDetail(duplicateId);
+}
+
+export function exportWorkflowJson(workflow: WorkflowDetail) {
+  return JSON.stringify({
+    name: workflow.name,
+    enabled: workflow.enabled,
+    trigger: workflow.trigger,
+    maxParallel: workflow.maxParallel,
+    steps: workflow.steps,
+    exportedAt: new Date().toISOString(),
+    format: "ai-automation.workflow.v1",
+  }, null, 2);
+}
+
 export function fetchWorkflows(): Promise<WorkflowSummary[]> {
   return apiFetch<unknown>("/workflows").then((raw) => {
     if (!Array.isArray(raw)) {

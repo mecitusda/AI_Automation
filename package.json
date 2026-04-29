@@ -31,6 +31,7 @@
     "test:auth-ownership": "node scripts/auth-ownership-test.js",
     "test:workflow-error-branch": "node scripts/workflow-error-branch-persist-test.js",
     "test:workflow-datastore": "node scripts/workflow-datastore-test.js",
+    "test:db-plugin-collections": "node scripts/db-plugin-collections-test.js",
     "test:chaos:seeded": "node scripts/seeded-chaos-test.js",
     "test:soak:1h": "node scripts/soak-test.js",
     "test:soak:6h": "cross-env SOAK_DURATION_SEC=21600 node scripts/soak-test.js",
@@ -51,6 +52,7 @@
     "node-cron": "^4.2.1",
     "nodemailer": "^6.9.16",
     "socket.io": "^4.8.3",
+    "styled-components": "^6.4.1",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "zod": "^3.25.76"

@@ -1,14 +1,10 @@
-import { useEffect, useCallback, useMemo, useRef, useState } from "react";
+import { useEffect, useCallback, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import ReactFlow, {
-  Background,
-  Controls,
-  MiniMap,
+import {
   ReactFlowProvider,
   addEdge,
   useNodesState,
   useEdgesState,
-  useReactFlow,
   type Node,
   type Edge,
   type Connection,
@@ -30,6 +26,7 @@ import {
 } from "../utils/workflowGraphEdges";
 import { fetchPlugins } from "../api/plugins";
 import type { PluginInfo, PluginHandles } from "../api/plugins";
+import { getPluginIcon, isIconAsset } from "../utils/pluginIcons";
 import { getNodeTypesByCategory, nodeRegistry } from "../nodes";
 import type { NodeTypeDef } from "../nodes";
 import { NODE_CATEGORIES } from "../nodes";
@@ -38,111 +35,13 @@ import IfNode from "../components/IfNode";
 import DefaultNode from "../components/DefaultNode";
 import StepEditModal, { type EditableStep } from "../components/StepEditModal";
 import { WorkflowEditorContext } from "../contexts/WorkflowEditorContext";
+import WorkflowEditorCanvas from "../components/WorkflowEditorCanvas";
+import NodeCommandPalette from "../components/NodeCommandPalette";
 
 const nodeTypes = {
   ifNode: IfNode,
   defaultNode: DefaultNode,
 };
-
-type EditorFlowInnerProps = {
-  nodes: Node[];
-  onNodesChange: (changes: any) => void;
-  onEdgesChange: (changes: any) => void;
-  onConnect: (connection: Connection) => void;
-  onNodeClick: NodeMouseHandler;
-  onNodeContextMenu: (e: React.MouseEvent, node: Node) => void;
-  onEdgeClick: (e: React.MouseEvent, edge: Edge) => void;
-  onPaneClick: () => void;
-  nodeTypes: typeof nodeTypes;
-  lastStepErrors: Record<string, Record<string, string>> | null;
-  addNode: (stepType: string, position?: { x: number; y: number }, connectFrom?: { sourceNodeId: string; sourceHandle?: string }) => void;
-  edgesWithSelection: Edge[];
-  onConnectEndRequest: (position: { x: number; y: number }, sourceNodeId: string, sourceHandle?: string) => void;
-  onPaneContextMenuRequest: (position: { x: number; y: number }) => void;
-};
-
-function EditorFlowInner({
-  nodes,
-  onNodesChange,
-  onEdgesChange,
-  onConnect,
-  onNodeClick,
-  onNodeContextMenu,
-  onEdgeClick,
-  onPaneClick,
-  nodeTypes: nt,
-  lastStepErrors,
-  addNode,
-  edgesWithSelection,
-  onConnectEndRequest,
-  onPaneContextMenuRequest,
-}: EditorFlowInnerProps) {
-  const { screenToFlowPosition } = useReactFlow();
-  const onPaneContextMenu = useCallback(
-    (event: React.MouseEvent) => {
-      event.preventDefault();
-      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      onPaneContextMenuRequest(position);
-    },
-    [screenToFlowPosition, onPaneContextMenuRequest]
-  );
-  const onConnectEnd = useCallback(
-    (event: MouseEvent | TouchEvent, connectionState?: unknown) => {
-      const state = connectionState as { isValid?: boolean; fromNode?: { id: string }; handleId?: string | null } | undefined;
-      if (!state || state.isValid || !state.fromNode) return;
-      const clientX = "changedTouches" in event ? (event as TouchEvent).changedTouches[0]?.clientX : (event as MouseEvent).clientX;
-      const clientY = "changedTouches" in event ? (event as TouchEvent).changedTouches[0]?.clientY : (event as MouseEvent).clientY;
-      if (clientX == null || clientY == null) return;
-      const position = screenToFlowPosition({ x: clientX, y: clientY });
-      onConnectEndRequest(position, state.fromNode.id, state.handleId ?? undefined);
-    },
-    [screenToFlowPosition, onConnectEndRequest]
-  );
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      const stepType = e.dataTransfer.getData("application/x-workflow-step-type");
-      if (!stepType) return;
-      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      addNode(stepType, position);
-    },
-    [addNode, screenToFlowPosition]
-  );
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  }, []);
-  return (
-    <ReactFlow
-      nodes={nodes.map((n) => ({
-        ...n,
-        data: {
-          ...n.data,
-          hasError: Boolean(lastStepErrors?.[n.id] && Object.keys(lastStepErrors[n.id]).length > 0),
-        },
-      }))}
-      edges={edgesWithSelection}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onConnect={onConnect}
-      onNodeClick={onNodeClick}
-      onNodeContextMenu={onNodeContextMenu}
-      onEdgeClick={onEdgeClick}
-      onPaneClick={onPaneClick}
-      onPaneContextMenu={onPaneContextMenu}
-      onDrop={onDrop}
-      onDragOver={onDragOver}
-      onConnectEnd={onConnectEnd}
-      nodeTypes={nt}
-      defaultEdgeOptions={{ type: "smoothstep" }}
-      fitView
-    >
-      <Background />
-      <Controls />
-      <MiniMap style={{ background: "#0b1220", border: "1px solid #1f2937", borderRadius: 8 }} nodeColor={() => "#374151"} />
-    </ReactFlow>
-  );
-}
 
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 72;
@@ -157,6 +56,7 @@ const DEFAULT_PARAMS: Record<string, Record<string, unknown>> = {
   if: { condition: "{{ trigger.flag }}", thenGoto: "", elseGoto: "" },
   email: { to: "", subject: "", body: "" },
   slack: { channel: "", text: "" },
+  "webhook.response": { statusCode: 200, body: '{ "ok": true }', headers: {} },
   "db.set": { key: "", value: {} },
   "db.get": { key: "" },
   "db.delete": { key: "" },
@@ -336,7 +236,7 @@ function getAddStepOptions(pluginCatalog: PluginInfo[]): Record<"ai" | "data" | 
       list.push({
         type: pluginType,
         label: plugin?.label ?? pluginType,
-        icon: "\u25A1",
+        icon: getPluginIcon(pluginType, category),
         description: "",
         category: category,
         formComponent: ParamsFallbackForm,
@@ -366,6 +266,7 @@ export default function WorkflowEditPage() {
     sourceNodeId?: string;
     sourceHandle?: string;
   } | null>(null);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const lastSavedStepsRef = useRef<string | null>(null);
 
   const initial = useMemo(() => {
@@ -383,6 +284,18 @@ export default function WorkflowEditPage() {
     setEdges(e);
     lastSavedStepsRef.current = JSON.stringify(workflow.steps);
   }, [workflow?.steps]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isCommandK = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
+      if (!isCommandK) return;
+      event.preventDefault();
+      setQuickAddMenu(null);
+      setCommandPaletteOpen(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -652,12 +565,12 @@ export default function WorkflowEditPage() {
     );
   }, [setNodes]);
 
-  const handleNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
+  const handleNodeContextMenu = useCallback((e: MouseEvent, node: Node) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, nodeId: node.id });
   }, []);
 
-  const handleEdgeClick = useCallback((_e: React.MouseEvent, edge: Edge) => {
+  const handleEdgeClick = useCallback((_e: MouseEvent, edge: Edge) => {
     setSelectedEdgeId(edge.id);
   }, []);
 
@@ -945,72 +858,27 @@ export default function WorkflowEditPage() {
 
   return (
     <div className="pageLayout pageLayout--edit">
-      {quickAddMenu && (
-        <div
-          style={{
-            position: "fixed",
-            left: "50%",
-            top: "40%",
-            transform: "translate(-50%, -50%)",
-            zIndex: 1001,
-            background: "#1f2937",
-            border: "1px solid #374151",
-            borderRadius: 12,
-            padding: 12,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
-            maxWidth: 320,
-            maxHeight: "70vh",
-            overflow: "auto",
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>
-            {quickAddMenu.sourceNodeId ? "Create new step (connect from handle)" : "Add step here"}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {(["data", "ai", "control", "utilities"] as const).map((cat) =>
-              (filteredAddStepOptions[cat] ?? []).map((def: NodeTypeDef) => (
-                <button
-                  key={def.type}
-                  type="button"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "6px 10px",
-                    textAlign: "left",
-                    background: "#0b1220",
-                    border: "1px solid #374151",
-                    borderRadius: 6,
-                    color: "#e5e7eb",
-                    cursor: "pointer",
-                    fontSize: 13,
-                  }}
-                  onClick={() => {
-                    addNode(
-                      def.type,
-                      quickAddMenu.position,
-                      quickAddMenu.sourceNodeId
-                        ? { sourceNodeId: quickAddMenu.sourceNodeId, sourceHandle: quickAddMenu.sourceHandle }
-                        : undefined
-                    );
-                    setQuickAddMenu(null);
-                  }}
-                >
-                  <span>{def.icon}</span>
-                  <span>{def.label}</span>
-                </button>
-              ))
-            )}
-          </div>
-          <button
-            type="button"
-            style={{ marginTop: 10, padding: "6px 12px", fontSize: 12, background: "#374151", border: "none", borderRadius: 6, color: "#e5e7eb", cursor: "pointer" }}
-            onClick={() => setQuickAddMenu(null)}
-          >
-            Cancel
-          </button>
-        </div>
-      )}
+      <NodeCommandPalette
+        open={commandPaletteOpen || Boolean(quickAddMenu)}
+        title={quickAddMenu?.sourceNodeId ? "Connect a new node" : "Add node"}
+        subtitle={quickAddMenu?.sourceNodeId ? "Pick a node to create and connect from the current handle." : "Search actions, AI, data, and control nodes."}
+        options={addStepOptions}
+        onClose={() => {
+          setQuickAddMenu(null);
+          setCommandPaletteOpen(false);
+        }}
+        onSelect={(type) => {
+          addNode(
+            type,
+            quickAddMenu?.position,
+            quickAddMenu?.sourceNodeId
+              ? { sourceNodeId: quickAddMenu.sourceNodeId, sourceHandle: quickAddMenu.sourceHandle }
+              : undefined
+          );
+          setQuickAddMenu(null);
+          setCommandPaletteOpen(false);
+        }}
+      />
       {contextMenu && (
         <div
           style={{
@@ -1246,6 +1114,12 @@ export default function WorkflowEditPage() {
       <div className="workflowEditWorkspace">
         <div className="card workflowEditSidebar">
           <h3 className="workflowEditSidebar__title">Add step</h3>
+          <div className="workflowEditSidebar__quick">
+            <button type="button" onClick={() => setCommandPaletteOpen(true)}>
+              <span>Quick add</span>
+              <kbd>Ctrl K</kbd>
+            </button>
+          </div>
           <div className="workflowEditSidebar__search">
             <input
               type="text"
@@ -1278,7 +1152,9 @@ export default function WorkflowEditPage() {
                     title={def.description || def.label}
                     data-category={cat}
                   >
-                    <span className="workflowEditSidebar__icon">{def.icon}</span>
+                    <span className="workflowEditSidebar__icon">
+                      {isIconAsset(def.icon) ? <img src={def.icon} alt="" /> : def.icon}
+                    </span>
                     <span className="workflowEditSidebar__label">{def.label}</span>
                   </button>
                 ))}
@@ -1381,7 +1257,7 @@ export default function WorkflowEditPage() {
               }}
             >
               <ReactFlowProvider>
-                <EditorFlowInner
+                <WorkflowEditorCanvas
                   nodes={nodesWithWarnings}
                   onNodesChange={onNodesChange}
                   onEdgesChange={onEdgesChange}
@@ -1397,7 +1273,10 @@ export default function WorkflowEditPage() {
                   onConnectEndRequest={(position, sourceNodeId, sourceHandle) =>
                     setQuickAddMenu({ position, sourceNodeId, sourceHandle })
                   }
-                  onPaneContextMenuRequest={() => {}}
+                  onPaneContextMenuRequest={(position) => {
+                    setQuickAddMenu({ position });
+                    setContextMenu(null);
+                  }}
                 />
               </ReactFlowProvider>
             </WorkflowEditorContext.Provider>

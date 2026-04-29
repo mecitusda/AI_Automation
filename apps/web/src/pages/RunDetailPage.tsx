@@ -27,6 +27,8 @@ type StepState = {
   status: "pending" | "running" | "retrying" | "completed" | "failed" | "skipped" | "cancelled";
   durationMs?: number;
   iteration?: number;
+  startedAt?: string;
+  finishedAt?: string;
 };
 
 type Log = {
@@ -170,7 +172,7 @@ export default function RunDetailPage() {
       window.clearTimeout(detailRefreshTimerRef.current);
     }
     detailRefreshDueAtRef.current = nextDueAt;
-    if (detailDebugRef.current.scheduled < 120) {
+    if (import.meta.env.DEV && detailDebugRef.current.scheduled < 120) {
       detailDebugRef.current.scheduled += 1;
       console.warn("[RunDetailRefreshScheduled]", {
         runId,
@@ -189,7 +191,7 @@ export default function RunDetailPage() {
       fetchRunDetail(runId, { signal: controller.signal })
         .then((d) => {
           if (reqSeq !== detailReqSeqRef.current) {
-            if (detailDebugRef.current.fetches < 80) {
+            if (import.meta.env.DEV && detailDebugRef.current.fetches < 80) {
               detailDebugRef.current.fetches += 1;
               console.warn("[RunDetailFetchStaleResponseIgnored]", {
                 runId,
@@ -200,7 +202,7 @@ export default function RunDetailPage() {
             }
             return;
           }
-          if (detailDebugRef.current.fetches < 80) {
+          if (import.meta.env.DEV && detailDebugRef.current.fetches < 80) {
             detailDebugRef.current.fetches += 1;
             console.warn("[RunDetailFetchDebug]", {
               runId,
@@ -217,6 +219,7 @@ export default function RunDetailPage() {
             const prevSteps = prev?.steps ?? [];
             const nextSteps = d.steps ?? [];
             if (nextSteps.length === 0 && prevSteps.length > 0) {
+              if (import.meta.env.DEV) {
               console.warn("[RunDetailTopologyRegressionBlocked]", {
                 runId,
                 seq: reqSeq,
@@ -226,11 +229,13 @@ export default function RunDetailPage() {
                 blockedBecause: "empty_steps",
                 prevStepIds: stepIds(prevSteps).slice(0, 20),
               });
+              }
               return { ...d, steps: prevSteps };
             }
             const missingIds = missingStepIds(prevSteps, nextSteps);
             const isRunning = d.status === "running";
             if (isRunning && prevSteps.length > 0 && nextSteps.length > 0 && missingIds.length > 0) {
+              if (import.meta.env.DEV) {
               console.warn("[RunDetailTopologyRegressionBlocked]", {
                 runId,
                 seq: reqSeq,
@@ -241,6 +246,7 @@ export default function RunDetailPage() {
                 missingCount: missingIds.length,
                 missingIds: missingIds.slice(0, 20),
               });
+              }
               return { ...d, steps: prevSteps };
             }
             return d;
@@ -675,6 +681,64 @@ export default function RunDetailPage() {
     if (!sid) continue;
     if (!failureByStep.has(sid)) failureByStep.set(sid, log);
   }
+  const timelineItems = [
+    ...filteredLogs
+      .filter((log) =>
+        log.message?.startsWith("[RUN START]") ||
+        log.message?.startsWith("[STEP START]") ||
+        log.message?.startsWith("[STEP COMPLETE]") ||
+        log.message?.startsWith("[STEP RETRY]") ||
+        log.message?.includes("Retry scheduled") ||
+        log.message?.startsWith("[RUN COMPLETE]") ||
+        log.message?.startsWith("[STEP TIMEOUT]") ||
+        log.message?.startsWith("[STEP FAIL]") ||
+        (log.stepId === "system" && log.message?.toLowerCase().includes("completed"))
+      )
+      .map((log, i) => {
+        let label = log.message;
+        if (log.message?.startsWith("[RUN START]")) label = "Run started";
+        else if (log.message?.startsWith("[STEP START]")) label = "Step started";
+        else if (log.message?.startsWith("[STEP COMPLETE]")) label = "Step completed";
+        else if (log.message?.startsWith("[STEP RETRY]") || log.message?.includes("Retry scheduled")) label = "Retry scheduled";
+        else if (log.message?.startsWith("[RUN COMPLETE]") || (log.stepId === "system" && log.message?.toLowerCase().includes("completed"))) label = "Run completed";
+        return {
+          key: `log-${i}`,
+          ts: log.createdAt ? new Date(log.createdAt).getTime() : 0,
+          time: log.createdAt ? new Date(log.createdAt).toLocaleTimeString() : "",
+          label,
+          status: log.level,
+          stepId: log.stepId,
+          detail: shouldShowSeparateLogError(log.message, log.error) ? log.error : "",
+        };
+      }),
+    ...stepStates.flatMap((step) => {
+      const suffix = step.iteration != null ? ` [${step.iteration}]` : "";
+      const rows = [];
+      if (step.startedAt) {
+        rows.push({
+          key: `start-${step.stepId}-${step.iteration ?? 0}`,
+          ts: new Date(step.startedAt).getTime(),
+          time: new Date(step.startedAt).toLocaleTimeString(),
+          label: `Started${suffix}`,
+          status: "system",
+          stepId: step.stepId,
+          detail: "",
+        });
+      }
+      if (step.finishedAt) {
+        rows.push({
+          key: `finish-${step.stepId}-${step.iteration ?? 0}`,
+          ts: new Date(step.finishedAt).getTime(),
+          time: new Date(step.finishedAt).toLocaleTimeString(),
+          label: `${step.status}${step.durationMs != null ? ` in ${step.durationMs}ms` : ""}${suffix}`,
+          status: step.status,
+          stepId: step.stepId,
+          detail: failureByStep.get(step.stepId)?.error || "",
+        });
+      }
+      return rows;
+    })
+  ].sort((a, b) => a.ts - b.ts);
 
   return (
     <div className="pageLayout">
@@ -786,43 +850,28 @@ export default function RunDetailPage() {
 
       <div className="pageSection" style={{ marginBottom: 16, maxHeight: "500px", overflowY: "auto" }}>
         <div className="sectionTitle">Run Timeline</div>
+        <div className="timelineSummary">
+          <span>{stepStates.length} step state{stepStates.length === 1 ? "" : "s"}</span>
+          <span>{logs.length} log event{logs.length === 1 ? "" : "s"}</span>
+          <span>{failureLogs.length} issue{failureLogs.length === 1 ? "" : "s"}</span>
+        </div>
         <div className="timelinePanel">
-          {filteredLogs
-            .filter((log) =>
-              log.message?.startsWith("[RUN START]") ||
-              log.message?.startsWith("[STEP START]") ||
-              log.message?.startsWith("[STEP COMPLETE]") ||
-              log.message?.startsWith("[STEP RETRY]") ||
-              log.message?.includes("Retry scheduled") ||
-              log.message?.startsWith("[RUN COMPLETE]") ||
-              log.message?.startsWith("[STEP TIMEOUT]") ||
-              log.message?.startsWith("[STEP FAIL]") ||
-              (log.stepId === "system" && log.message?.toLowerCase().includes("completed"))
-            )
-            .map((log, i) => {
-              let label = log.message;
-              if (log.message?.startsWith("[RUN START]")) label = "Run started";
-              else if (log.message?.startsWith("[STEP START]")) label = "Step started";
-              else if (log.message?.startsWith("[STEP COMPLETE]")) label = "Step completed";
-              else if (log.message?.startsWith("[STEP RETRY]") || log.message?.includes("Retry scheduled")) label = "Retry scheduled";
-              else if (log.message?.startsWith("[RUN COMPLETE]") || (log.stepId === "system" && log.message?.toLowerCase().includes("completed"))) label = "Run completed";
-              else if (log.message?.startsWith("[STEP TIMEOUT]")) label = log.message;
-              else if (log.message?.startsWith("[STEP FAIL]")) label = log.message;
-              return (
-                <div key={i} className="logRow timelinePanel__row">
-                  <div className="logTime timelinePanel__time">
-                    {log.createdAt ? new Date(log.createdAt).toLocaleTimeString() : ""}
-                  </div>
-                  <div className={`logMsg ${logKind(log.level)} timelinePanel__msg`}>{label}</div>
-                  {log.stepId && log.stepId !== "system" && (
-                    <span className="timelinePanel__step" style={{ color: getStepColor(log.stepId) }}>[{log.stepId}]</span>
-                  )}
-                  {shouldShowSeparateLogError(log.message, log.error) ? (
-                    <div className="timelinePanel__error">{log.error}</div>
-                  ) : null}
-                </div>
-              );
-            })}
+          {timelineItems.map((item) => (
+            <div key={item.key} className="timelinePanel__event">
+              <div className="timelinePanel__rail">
+                <span className={`timelinePanel__dot ${String(item.status)}`} />
+              </div>
+              <div className="timelinePanel__time">{item.time}</div>
+              <div>
+                <div className={`logMsg ${logKind(item.status as Log["level"])} timelinePanel__msg`}>{item.label}</div>
+                {item.stepId && item.stepId !== "system" && (
+                  <span className="timelinePanel__step" style={{ color: getStepColor(item.stepId) }}>[{item.stepId}]</span>
+                )}
+                {item.detail ? <div className="timelinePanel__error">{item.detail}</div> : null}
+              </div>
+            </div>
+          ))}
+          {timelineItems.length === 0 ? <div className="timelinePanel__empty">No timeline events match the current filters.</div> : null}
         </div>
       </div>
 

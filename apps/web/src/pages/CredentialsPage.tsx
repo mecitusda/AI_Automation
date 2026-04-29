@@ -5,6 +5,7 @@ import {
   deleteCredential,
   fetchCredentialById,
   fetchCredentials,
+  testCredential,
   updateCredential,
   type CredentialMeta,
 } from "../api/credentials";
@@ -18,6 +19,14 @@ type PluginWithCredential = {
 };
 
 const TELEGRAM_CREDENTIAL_TYPE = "telegram.bot";
+const KNOWN_CREDENTIAL_FIELDS: Record<string, Array<{ key: string; label: string; placeholder?: string; type?: string }>> = {
+  "telegram.bot": [{ key: "botToken", label: "Bot token", placeholder: "123456:ABC..." }],
+  openai: [
+    { key: "apiKey", label: "API key", placeholder: "sk-..." },
+    { key: "baseUrl", label: "Base URL", placeholder: "https://api.openai.com/v1" }
+  ],
+  slack: [{ key: "token", label: "Bot token", placeholder: "xoxb-..." }]
+};
 
 function defaultDataTemplateForType(credentialType: string) {
   if (credentialType === TELEGRAM_CREDENTIAL_TYPE) {
@@ -52,6 +61,8 @@ export default function CredentialsPage() {
   const [type, setType] = useState("");
   const [dataJson, setDataJson] = useState(defaultDataTemplateForType(""));
   const [error, setError] = useState<string>("");
+  const [testLoading, setTestLoading] = useState(false);
+  const [testMessage, setTestMessage] = useState("");
 
   async function load() {
     setLoading(true);
@@ -162,6 +173,21 @@ export default function CredentialsPage() {
     }
   };
 
+  const dataObject = useMemo(() => {
+    try {
+      const parsed = JSON.parse(dataJson);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    } catch {
+      return {};
+    }
+  }, [dataJson]);
+
+  const updateDataField = (key: string, value: string) => {
+    setDataJson(JSON.stringify({ ...dataObject, [key]: value }, null, 2));
+  };
+
+  const knownFields = KNOWN_CREDENTIAL_FIELDS[type.trim()] || [];
+
   const handleCreateOrUpdate = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
@@ -225,6 +251,21 @@ export default function CredentialsPage() {
     }
   };
 
+  const handleTestCredential = async () => {
+    if (!selectedCredentialId) return;
+    setTestLoading(true);
+    setTestMessage("");
+    setError("");
+    try {
+      const result = await testCredential(selectedCredentialId);
+      setTestMessage(result.message || "Credential test passed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Credential test failed");
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
   return (
     <div className="pageLayout">
       <header className="pageHeader">
@@ -233,7 +274,7 @@ export default function CredentialsPage() {
 
       <main className="pageContent credentialsPage">
         <section className="card credentialsPluginList">
-          <h3 className="card-title">Plugins</h3>
+          <h3 className="card-title" style={{marginBottom: 10}}>Plugins</h3>
           <div className="credentialsTable">
             {plugins.length === 0 ? (
               <div className="subtle">No credential-enabled plugins found.</div>
@@ -329,6 +370,21 @@ export default function CredentialsPage() {
 
               <label>
                 Data (JSON object)
+                {knownFields.length > 0 ? (
+                  <div className="credentialStructuredFields">
+                    {knownFields.map((field) => (
+                      <label key={field.key}>
+                        {field.label}
+                        <input
+                          type={field.type || "password"}
+                          value={String(dataObject[field.key] ?? "")}
+                          onChange={(e) => updateDataField(field.key, e.target.value)}
+                          placeholder={field.placeholder}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
                 <textarea
                   value={dataJson}
                   onChange={(e) => setDataJson(e.target.value)}
@@ -346,8 +402,14 @@ export default function CredentialsPage() {
                     Cancel edit
                   </button>
                 ) : null}
+                {isEditMode ? (
+                  <button type="button" onClick={handleTestCredential} disabled={testLoading}>
+                    {testLoading ? "Testing..." : "Test connection"}
+                  </button>
+                ) : null}
               </div>
             </form>
+            {testMessage ? <div className="credentialsSuccess">{testMessage}</div> : null}
           </div>
 
           {error ? <div className="credentialsError">{error}</div> : null}

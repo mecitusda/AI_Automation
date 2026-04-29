@@ -250,6 +250,29 @@ function shallowEqualData(a: NodeData, b: NodeData): boolean {
   return true;
 }
 
+function minimapNodeColor(node: Node): string {
+  const status = (node.data as { status?: string })?.status;
+  switch (status) {
+    case "completed":
+      return "#22c55e";
+    case "failed":
+      return "#ef4444";
+    case "running":
+      return "#3b82f6";
+    case "retrying":
+      return "#f97316";
+    case "skipped":
+      return "#8b5cf6";
+    case "cancelled":
+      return "#78716c";
+    case "partial":
+      return "#14b8a6";
+    case "pending":
+    default:
+      return "#94a3b8";
+  }
+}
+
 function WorkflowGraph({ steps, onNodeClick, stepStates, loopProgressByStep, failureHintByStepId }: Props) {
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const nodeTypes = useMemo(() => NODE_TYPES, []);
@@ -421,12 +444,17 @@ function WorkflowGraph({ steps, onNodeClick, stepStates, loopProgressByStep, fai
         <Controls />
         <MiniMap
           style={{
-            background: "#0b1220",
-            border: "1px solid #1f2937",
-            borderRadius: 8
+            background: "rgba(248, 250, 252, 0.96)",
+            border: "1px solid rgba(148, 163, 184, 0.45)",
+            borderRadius: 10,
+            boxShadow: "0 10px 24px rgba(15, 23, 42, 0.16)",
           }}
-          maskColor="rgba(0,0,0,0.4)"
-          nodeColor={() => "#374151"}
+          maskColor="rgba(59, 130, 246, 0.08)"
+          maskStrokeColor="rgba(37, 99, 235, 0.45)"
+          maskStrokeWidth={1.5}
+          nodeColor={minimapNodeColor}
+          nodeStrokeColor={() => "#0f172a"}
+          nodeBorderRadius={3}
           pannable
           zoomable
         />

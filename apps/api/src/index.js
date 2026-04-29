@@ -31,9 +31,18 @@ import { authOptional, requireAdmin, requireAuth } from "./middleware/auth.js";
 import { apiPerfMiddleware } from "./utils/apiPerf.js";
 
 const app = express();
+const corsOrigins = String(process.env.CORS_ORIGIN || "*")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 app.use(cors({
-  origin: "*",
+  origin: corsOrigins.includes("*")
+    ? "*"
+    : (origin, callback) => {
+        if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+        return callback(new Error("CORS origin not allowed"));
+      },
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));

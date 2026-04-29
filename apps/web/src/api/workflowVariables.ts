@@ -1,8 +1,13 @@
 import { apiFetch } from "./client";
 
+export type DataStoreScope = "workflow" | "user";
+export type DataStoreScopeFilter = DataStoreScope | "all";
+
 export type WorkflowVariableItem = {
   id: string;
-  workflowId: string;
+  workflowId: string | null;
+  scope: DataStoreScope;
+  collection: string;
   key: string;
   value: unknown;
   valueType: string | null;
@@ -22,24 +27,39 @@ export type WorkflowVariableListResponse = {
 };
 
 export function listWorkflowVariables(params: {
-  workflowId: string;
+  workflowId?: string;
+  scope?: DataStoreScopeFilter;
+  collection?: string;
   page?: number;
   limit?: number;
   q?: string;
   key?: string;
 }): Promise<WorkflowVariableListResponse> {
-  const qs = new URLSearchParams({
-    workflowId: params.workflowId,
-    ...(params.page ? { page: String(params.page) } : {}),
-    ...(params.limit ? { limit: String(params.limit) } : {}),
-    ...(params.q ? { q: params.q } : {}),
-    ...(params.key ? { key: params.key } : {})
-  });
+  const qs = new URLSearchParams();
+  if (params.workflowId) qs.set("workflowId", params.workflowId);
+  if (params.scope) qs.set("scope", params.scope);
+  if (params.collection !== undefined) qs.set("collection", params.collection);
+  if (params.page) qs.set("page", String(params.page));
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.q) qs.set("q", params.q);
+  if (params.key) qs.set("key", params.key);
   return apiFetch<WorkflowVariableListResponse>(`/workflow-variables?${qs.toString()}`);
 }
 
+export function listWorkflowVariableCollections(params: {
+  scope: DataStoreScope;
+  workflowId?: string;
+}): Promise<{ collections: string[] }> {
+  const qs = new URLSearchParams();
+  qs.set("scope", params.scope);
+  if (params.workflowId) qs.set("workflowId", params.workflowId);
+  return apiFetch<{ collections: string[] }>(`/workflow-variables/collections?${qs.toString()}`);
+}
+
 export function createWorkflowVariable(body: {
-  workflowId: string;
+  workflowId?: string;
+  scope: DataStoreScope;
+  collection?: string;
   key: string;
   value: unknown;
   valueType?: string;

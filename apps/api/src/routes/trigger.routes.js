@@ -30,6 +30,41 @@ function buildTriggerPayload(body, query) {
   return { body: bodyObj, query: queryObj, payload: bodyObj };
 }
 
+function getWebhookResponseStep(workflow) {
+  return (workflow.steps || []).find((step) => step?.type === "webhook.response") || null;
+}
+
+async function waitForWebhookResponse({ Run, runId, responseStepId, timeoutMs = 15000 }) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const run = await Run.findById(runId).select("status outputs lastError").lean();
+    const outputs = run?.outputs;
+    const stepOutput = outputs instanceof Map ? outputs.get(responseStepId) : outputs?.[responseStepId];
+    const firstOutput = stepOutput?.["0"] ?? stepOutput?.[0] ?? stepOutput;
+    if (firstOutput) {
+      const payload = firstOutput?.output && typeof firstOutput.output === "object" ? firstOutput.output : firstOutput;
+      return {
+        statusCode: Number(payload?.statusCode ?? 200),
+        headers: payload?.headers && typeof payload.headers === "object" ? payload.headers : {},
+        body: payload?.body ?? payload,
+      };
+    }
+    if (run?.status === "failed" || run?.status === "cancelled") {
+      return {
+        statusCode: run.status === "cancelled" ? 499 : 500,
+        headers: {},
+        body: { error: run.lastError?.message || `Workflow ${run.status}` },
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return {
+    statusCode: 202,
+    headers: {},
+    body: { runId: runId.toString(), message: "Run is still processing" },
+  };
+}
+
 /**
  * Shared webhook handler: load workflow, validate, create run, publish.
  * Used by both GET and POST.
@@ -101,6 +136,21 @@ async function handleWebhook(req, res, bodyOverride = undefined) {
     "run.start",
     Buffer.from(JSON.stringify({ runId: run._id.toString() }))
   );
+  const responseStep = getWebhookResponseStep(workflow);
+  if (responseStep) {
+    const requestedTimeout = Number(req.query?.timeoutMs ?? responseStep.params?.timeoutMs ?? 15000);
+    const timeoutMs = Math.max(1000, Math.min(Number.isFinite(requestedTimeout) ? requestedTimeout : 15000, 25000));
+    const response = await waitForWebhookResponse({
+      Run,
+      runId: run._id,
+      responseStepId: responseStep.id,
+      timeoutMs
+    });
+    for (const [key, value] of Object.entries(response.headers || {})) {
+      if (typeof value === "string") res.setHeader(key, value);
+    }
+    return res.status(response.statusCode).json(response.body);
+  }
   return res.status(202).json({
     runId: run._id.toString(),
     message: "Run queued",

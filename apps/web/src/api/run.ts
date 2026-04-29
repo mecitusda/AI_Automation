@@ -77,12 +77,13 @@ export async function fetchRunDetail(id: string, init?: RequestInit): Promise<Ru
 export type RunSummary = {
   id: string;
   workflowId?: string;
+  workflowName?: string;
   status: string;
   createdAt?: string;
 };
 
 export async function fetchRuns(): Promise<RunSummary[]> {
-  const list = await apiFetch<Array<{ _id: string; workflowId?: string | { _id?: string }; status: string; createdAt?: string }>>("/runs");
+  const list = await apiFetch<Array<{ _id: string; workflowId?: string | { _id?: string; name?: string }; status: string; createdAt?: string }>>("/runs");
   return list.map((r) => ({
     id: r._id,
     workflowId: typeof r.workflowId === "object" && r.workflowId && "_id" in r.workflowId
@@ -90,6 +91,9 @@ export async function fetchRuns(): Promise<RunSummary[]> {
       : typeof r.workflowId === "string"
         ? r.workflowId
         : undefined,
+    workflowName: typeof r.workflowId === "object" && r.workflowId && "name" in r.workflowId
+      ? (r.workflowId as { name?: string }).name
+      : undefined,
     status: r.status,
     createdAt: r.createdAt,
   }));

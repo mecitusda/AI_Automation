@@ -76,6 +76,55 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+router.post("/:id/test", async (req, res) => {
+  try {
+    const { Credential } = modelsOf(req);
+    const doc = await Credential.findOne({ _id: req.params.id, userId: req.user.id }).select("name type data").lean();
+    if (!doc) return res.status(404).json({ error: "Credential not found" });
+    const data = decrypt(doc.data);
+    const type = doc.type;
+
+    if (type === "telegram.bot") {
+      const botToken = data?.botToken || data?.token;
+      if (!botToken) return res.status(400).json({ error: "botToken is required" });
+      const tg = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+      const json = await tg.json().catch(() => ({}));
+      if (!tg.ok || json?.ok === false) {
+        return res.status(400).json({ error: json?.description || "Telegram credential test failed" });
+      }
+      return res.json({ ok: true, message: `Telegram bot connected: @${json?.result?.username || "unknown"}` });
+    }
+
+    if (type === "openai") {
+      const apiKey = data?.apiKey;
+      if (!apiKey) return res.status(400).json({ error: "apiKey is required" });
+      const baseUrl = data?.baseUrl || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+      const ai = await fetch(`${String(baseUrl).replace(/\/$/, "")}/models`, {
+        headers: { Authorization: `Bearer ${apiKey}` }
+      });
+      if (!ai.ok) return res.status(400).json({ error: `OpenAI credential test failed (${ai.status})` });
+      return res.json({ ok: true, message: "OpenAI credential connected" });
+    }
+
+    if (type === "slack") {
+      const token = data?.token || data?.botToken;
+      if (!token) return res.status(400).json({ error: "token is required" });
+      const slack = await fetch("https://slack.com/api/auth.test", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = await slack.json().catch(() => ({}));
+      if (!slack.ok || json?.ok === false) {
+        return res.status(400).json({ error: json?.error || "Slack credential test failed" });
+      }
+      return res.json({ ok: true, message: `Slack workspace connected: ${json?.team || "unknown"}` });
+    }
+
+    return res.json({ ok: true, message: "Credential JSON is decryptable. No remote test is defined for this type." });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Credential test failed" });
+  }
+});
+
 router.put("/:id", async (req, res) => {
   try {
     const { Credential } = modelsOf(req);

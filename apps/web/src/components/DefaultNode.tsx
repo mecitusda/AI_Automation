@@ -4,6 +4,7 @@ import { useWorkflowEditor } from "../contexts/WorkflowEditorContext";
 import { getNodeType, getNodeSummary } from "../nodes";
 import type { PluginHandles } from "../api/plugins";
 import { resolveSummaryTemplate } from "../api/plugins";
+import { getPluginIcon, isIconAsset } from "../utils/pluginIcons";
 
 const toolbarBtnStyle: React.CSSProperties = {
   background: "transparent",
@@ -24,7 +25,7 @@ export default function DefaultNode({ id, data }: NodeProps) {
   const nodeType = getNodeType(stepType);
   const typeLabel = nodeType?.label ?? (stepType || "Step");
   const displayLabel = (data as { label?: string }).label ?? typeLabel;
-  const icon = nodeType?.icon ?? "\u25A1";
+  const icon = nodeType?.icon ?? getPluginIcon(stepType);
   const description = (data as { description?: string }).description;
   const params = (data as { params?: Record<string, unknown> }).params ?? {};
   const summaryTemplate = (data as { summaryTemplate?: string }).summaryTemplate;
@@ -164,7 +165,9 @@ export default function DefaultNode({ id, data }: NodeProps) {
           {(data as { hasWarning?: boolean }).hasWarning && !(data as { hasError?: boolean }).hasError && (
             <span title="Variable warnings" style={{ color: "#eab308", fontSize: 12 }}>⚠</span>
           )}
-          <span style={{ fontSize: 14 }}>{icon}</span>
+          <span style={{ fontSize: 18, display: "inline-flex", alignItems: "center" }}>
+            {isIconAsset(icon) ? <img src={icon} alt="" style={{ width: 18, height: 18 }} /> : icon}
+          </span>
           <span>{displayLabel}</span>
           {["foreach", "if", "switch"].includes(stepType) ? (
             <span style={{ fontSize: 9, padding: "1px 4px", borderRadius: 4, background: "#1f2937", color: "#93c5fd" }}>

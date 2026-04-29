@@ -9,6 +9,7 @@ import IfNodeForm from "./forms/IfNodeForm";
 import DelayNodeForm from "./forms/DelayNodeForm";
 import EmailNodeForm from "./forms/EmailNodeForm";
 import SlackNodeForm from "./forms/SlackNodeForm";
+import { getPluginIcon } from "../utils/pluginIcons";
 
 function defaultSummary(params: Record<string, unknown>, parts: string[]): string {
   const out: string[] = [];
@@ -25,7 +26,7 @@ const registry: Record<string, NodeTypeDef> = {
   http: {
     type: "http",
     label: "HTTP Request",
-    icon: "🌐",
+    icon: getPluginIcon("http"),
     description: "Make an HTTP request to external APIs.",
     category: "data",
     formComponent: HttpNodeForm,
@@ -62,7 +63,7 @@ const registry: Record<string, NodeTypeDef> = {
   openai: {
     type: "openai",
     label: "OpenAI",
-    icon: "🤖",
+    icon: getPluginIcon("openai"),
     description: "Calls OpenAI API to generate text, analyze data, or produce structured output.",
     category: "ai",
     formComponent: OpenAINodeForm,
@@ -92,16 +93,38 @@ const registry: Record<string, NodeTypeDef> = {
   log: {
     type: "log",
     label: "Log",
-    icon: "📋",
+    icon: getPluginIcon("log"),
     description: "Log a message to the console (variables resolved before execution).",
     category: "utilities",
     formComponent: LogNodeForm,
     getSummary: (p) => (p?.message as string) ? String(p.message).slice(0, 50) : "—",
   },
+  "webhook.response": {
+    type: "webhook.response",
+    label: "Webhook Response",
+    icon: getPluginIcon("webhook.response"),
+    description: "Return a custom synchronous response from webhook-triggered workflows.",
+    category: "utilities",
+    formComponent: ParamsFallbackForm,
+    fieldHelp: {
+      statusCode: "HTTP status code to send back to the webhook caller.",
+      body: "JSON string or text body. Variables are resolved before this node runs.",
+      headers: "Optional response headers as a JSON object.",
+    },
+    validateParams: (p) => {
+      const err: Record<string, string> = {};
+      const statusCode = Number(p?.statusCode ?? 200);
+      if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 599) {
+        err.statusCode = "Status code must be between 100 and 599";
+      }
+      return err;
+    },
+    getSummary: (p) => `HTTP ${Number(p?.statusCode ?? 200)}`,
+  },
   delay: {
     type: "delay",
     label: "Delay",
-    icon: "⏱",
+    icon: getPluginIcon("delay"),
     description: "Wait for a specified time before continuing.",
     category: "control",
     formComponent: DelayNodeForm,
@@ -113,7 +136,7 @@ const registry: Record<string, NodeTypeDef> = {
   foreach: {
     type: "foreach",
     label: "Foreach",
-    icon: "🔄",
+    icon: getPluginIcon("foreach"),
     description: "Iterate over an array and run steps for each item.",
     category: "control",
     formComponent: ForeachNodeForm,
@@ -131,7 +154,7 @@ const registry: Record<string, NodeTypeDef> = {
   if: {
     type: "if",
     label: "IF",
-    icon: "◇",
+    icon: getPluginIcon("if"),
     description: "Conditional branch based on an expression.",
     category: "control",
     formComponent: IfNodeForm,
@@ -148,7 +171,7 @@ const registry: Record<string, NodeTypeDef> = {
   email: {
     type: "email",
     label: "Email",
-    icon: "✉",
+    icon: getPluginIcon("email"),
     description: "Send an email.",
     category: "utilities",
     formComponent: EmailNodeForm,
@@ -162,7 +185,7 @@ const registry: Record<string, NodeTypeDef> = {
   slack: {
     type: "slack",
     label: "Slack",
-    icon: "💬",
+    icon: getPluginIcon("slack"),
     description: "Send a message to a Slack channel.",
     category: "utilities",
     formComponent: SlackNodeForm,
@@ -176,7 +199,7 @@ const registry: Record<string, NodeTypeDef> = {
   "ai.summarize": {
     type: "ai.summarize",
     label: "AI Summarize",
-    icon: "📝",
+    icon: getPluginIcon("ai.summarize"),
     description: "Summarize text or previous step output.",
     category: "ai",
     formComponent: AiSummarizeNodeForm,

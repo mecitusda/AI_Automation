@@ -17,6 +17,7 @@ const tests = [
 const extendedTests = [
   "test:duplicate",
   "test:auth-ownership",
+  "test:db-plugin-collections",
 ];
 
 const STRICT_EXTENDED = process.env.STRICT_EXTENDED_TESTS === "true";
