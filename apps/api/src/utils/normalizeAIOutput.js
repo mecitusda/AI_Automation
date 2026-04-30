@@ -56,9 +56,10 @@ export function normalizeAIOutput(raw, options = {}) {
       }
     }
 
-    // Bullet or number list: lines like "1. item", "• item", "- item", "* item"
+    // Bullet or number list: lines like "1. item", "• item", "- item", "* item".
+    // Require whitespace after marker so Markdown bold ("**title**") is not treated as a list item.
     const lines = trimmed.split(/\r?\n/);
-    const listItemRegex = /^\s*[\d•\-*]\.?\s*(.+)$/;
+    const listItemRegex = /^\s*(?:\d+\.\s+|[•\-]\s+|\*\s+)(.+)$/;
     const hasListPattern = lines.some((line) => listItemRegex.test(line.trim()));
     if (hasListPattern) {
       const extracted = [];

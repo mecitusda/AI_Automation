@@ -37,6 +37,7 @@ import StepEditModal, { type EditableStep } from "../components/StepEditModal";
 import { WorkflowEditorContext } from "../contexts/WorkflowEditorContext";
 import WorkflowEditorCanvas from "../components/WorkflowEditorCanvas";
 import NodeCommandPalette from "../components/NodeCommandPalette";
+import { parseVariables } from "../utils/variableSystem";
 
 const nodeTypes = {
   ifNode: IfNode,
@@ -261,6 +262,9 @@ export default function WorkflowEditPage() {
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [testRunLoading, setTestRunLoading] = useState(false);
   const [testRunMessage, setTestRunMessage] = useState("");
+  const [runInputOpen, setRunInputOpen] = useState(false);
+  const [runInputJson, setRunInputJson] = useState("{\n\n}");
+  const [runInputError, setRunInputError] = useState("");
   const [quickAddMenu, setQuickAddMenu] = useState<{
     position: { x: number; y: number };
     sourceNodeId?: string;
@@ -839,6 +843,61 @@ export default function WorkflowEditPage() {
 
   const handleTestRun = useCallback(async () => {
     if (!id) return;
+
+    const collectTriggerPaths = (obj: unknown, out: Set<string>) => {
+      if (obj == null) return;
+      if (typeof obj === "string") {
+        for (const path of parseVariables(obj)) {
+          if (path.startsWith("trigger.")) out.add(path);
+        }
+        return;
+      }
+      if (Array.isArray(obj)) {
+        for (const item of obj) collectTriggerPaths(item, out);
+        return;
+      }
+      if (typeof obj === "object") {
+        for (const value of Object.values(obj as Record<string, unknown>)) {
+          collectTriggerPaths(value, out);
+        }
+      }
+    };
+
+    const buildInputTemplate = (triggerPaths: string[]) => {
+      const root: Record<string, unknown> = {};
+      for (const fullPath of triggerPaths) {
+        const segments = fullPath.split(".").slice(1);
+        if (segments.length === 0) continue;
+        let cursor: Record<string, unknown> = root;
+        for (let i = 0; i < segments.length; i++) {
+          const seg = segments[i];
+          const isLast = i === segments.length - 1;
+          if (isLast) {
+            if (cursor[seg] === undefined) cursor[seg] = null;
+            continue;
+          }
+          const next = cursor[seg];
+          if (!next || typeof next !== "object" || Array.isArray(next)) {
+            cursor[seg] = {};
+          }
+          cursor = cursor[seg] as Record<string, unknown>;
+        }
+      }
+      return root;
+    };
+
+    const steps = buildSteps();
+    const triggerPaths = new Set<string>();
+    for (const step of steps) collectTriggerPaths(step.params ?? {}, triggerPaths);
+
+    if (triggerPaths.size > 0) {
+      const template = buildInputTemplate(Array.from(triggerPaths).sort((a, b) => a.localeCompare(b)));
+      setRunInputJson(JSON.stringify(template, null, 2));
+      setRunInputError("");
+      setRunInputOpen(true);
+      return;
+    }
+
     setTestRunLoading(true);
     setTestRunMessage("");
     try {
@@ -850,7 +909,36 @@ export default function WorkflowEditPage() {
     } finally {
       setTestRunLoading(false);
     }
-  }, [id]);
+  }, [id, buildSteps]);
+
+  const handleConfirmRunWithInput = useCallback(async () => {
+    if (!id) return;
+    let parsed: Record<string, unknown>;
+    try {
+      const value = JSON.parse(runInputJson);
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        setRunInputError("Run input must be a JSON object");
+        return;
+      }
+      parsed = value as Record<string, unknown>;
+    } catch {
+      setRunInputError("Run input is not valid JSON");
+      return;
+    }
+
+    setRunInputOpen(false);
+    setTestRunLoading(true);
+    setTestRunMessage("");
+    try {
+      const result = await startRun(id, { triggerPayload: parsed });
+      setLastRunId(result.runId);
+      setTestRunMessage(`Test run queued: ${result.runId}`);
+    } catch (err) {
+      setTestRunMessage(err instanceof Error ? err.message : "Test run failed");
+    } finally {
+      setTestRunLoading(false);
+    }
+  }, [id, runInputJson]);
 
   if (loading) return <div className="pageLayout"><div className="spinner" /></div>;
   if (error && !workflow) return <div className="pageLayout">Error: {error}</div>;
@@ -858,6 +946,38 @@ export default function WorkflowEditPage() {
 
   return (
     <div className="pageLayout pageLayout--edit">
+      {runInputOpen && (
+        <div className="modalOverlay" onClick={() => setRunInputOpen(false)}>
+          <div className="modalCard" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760 }}>
+            <h2 style={{ marginTop: 0 }}>Run input required</h2>
+            <p className="subtle" style={{ marginBottom: 10 }}>
+              This workflow references `trigger.*` variables. Provide a JSON object to run the test.
+            </p>
+            <textarea
+              value={runInputJson}
+              onChange={(e) => setRunInputJson(e.target.value)}
+              rows={12}
+              spellCheck={false}
+              style={{
+                width: "100%",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#0f172a",
+                borderRadius: 8,
+                padding: 10,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              }}
+            />
+            {runInputError ? <div className="credentialsError">{runInputError}</div> : null}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+              <button type="button" onClick={() => setRunInputOpen(false)}>Cancel</button>
+              <button type="button" onClick={handleConfirmRunWithInput} disabled={testRunLoading}>
+                {testRunLoading ? "Starting…" : "Start run"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <NodeCommandPalette
         open={commandPaletteOpen || Boolean(quickAddMenu)}
         title={quickAddMenu?.sourceNodeId ? "Connect a new node" : "Add node"}

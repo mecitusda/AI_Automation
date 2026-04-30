@@ -13,6 +13,7 @@
     "test:success": "node scripts/success-basic-test.js",
     "test:http-error": "node scripts/http-step-error-test.js",
     "test:redact": "node scripts/redact-execution-params-test.js",
+    "test:normalize-ai-output": "node scripts/normalize-ai-output-test.js",
     "test:step-inputs": "node scripts/step-inputs-detail-test.js",
     "test:ai-invalid-json": "node scripts/ai-invalid-json-test.js",
     "test:ai-valid-json": "node scripts/ai-valid-json-test.js",
