@@ -31,7 +31,7 @@ export default function LoginPage() {
       if (!res.ok) throw new Error(json?.error || (mode === "register" ? t("login.registrationFailed") : t("login.loginFailed")));
       setAccessToken(json.accessToken);
       if (json.refreshToken) setRefreshToken(json.refreshToken);
-      navigate("/");
+      navigate("/runs", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : (mode === "register" ? t("login.registrationFailed") : t("login.loginFailed")));
     } finally {

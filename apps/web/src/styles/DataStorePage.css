@@ -251,3 +251,55 @@
     grid-template-columns: 1fr;
   }
 }
+
+[data-theme="dark"] .dataStorePage__scopeToggle {
+  border-color: #334155;
+  background: #0f1b31;
+}
+
+[data-theme="dark"] .dataStorePage__scopeToggle button {
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .dataStorePage__panelTitle,
+[data-theme="dark"] .dataStorePage__label,
+[data-theme="dark"] .dataStoreRecord__key,
+[data-theme="dark"] .dataStoreRecord__description {
+  color: #e5e7eb;
+}
+
+[data-theme="dark"] .dataStorePage__empty,
+[data-theme="dark"] .dataStoreRecord__time {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .dataStorePage__select,
+[data-theme="dark"] .dataStorePage__input,
+[data-theme="dark"] .dataStorePage__textarea {
+  background: #111c30;
+  border-color: #334155;
+  color: #e5e7eb;
+}
+
+[data-theme="dark"] .dataStoreRecord {
+  background: #0f1b31;
+  border-color: #334155;
+}
+
+[data-theme="dark"] .dataStoreRecord:hover {
+  background: #13284b;
+  border-color: #3b82f6;
+}
+
+[data-theme="dark"] .dataStoreRecord.is-active {
+  background: #13284b;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.28);
+}
+
+[data-theme="dark"] .dataStoreRecord__badge,
+[data-theme="dark"] .dataStoreRecord__tag {
+  border-color: #334155;
+  color: #cbd5e1;
+  background: #1e293b;
+}

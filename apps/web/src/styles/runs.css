@@ -11,7 +11,7 @@
 
   --text: var(--text, #111827);
   --muted: var(--muted, #6b7280);
-  --muted-2: color-mix(in srgb, var(--muted, #9ca3af) 75%, transparent);
+  --muted-2: color-mix(in srgb, var(--muted, #9ca3af) 90%, transparent);
 
   --blue:#3b82f6;
   --green:#22c55e;
@@ -897,27 +897,28 @@
 
 .metric{
   background: var(--panel-3);
-  border: 1px solid #d7dee9;
+  border: 1px solid var(--border);
   border-radius: 14px;
   padding: 14px;
 }
 
 .metricLabel{
   font-size: 12px;
-  color: #6b7280;
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .metricValue{
   margin-top: 8px;
   font-size: 18px;
   font-weight: 900;
-  color: #111827;
+  color: var(--text);
 }
 
 .metricHint{
   margin-top: 6px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--muted);
 }
 
 .monitoring-card {
@@ -944,11 +945,25 @@
 }
 
 .monitoring-grid > div {
-  border-right: 1px solid #d7deea;
-  color: #334155;
+  border-right: 1px solid var(--border);
+  color: var(--text);
 }
 .monitoring-grid > div:last-child{
   border: none;
+}
+
+.monitoring-grid > div strong {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.monitoring-grid > div p {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
 }
 .badge-ok {
   background: #065f46;
@@ -962,6 +977,41 @@
   padding: 4px 8px;
   border-radius: 6px;
   color: #f97316;
+}
+
+[data-theme="dark"] .metricsTitle {
+  color: #f1f5f9;
+}
+
+[data-theme="dark"] .metric {
+  background: #1a2740;
+  border-color: #334155;
+}
+
+[data-theme="dark"] .metricLabel {
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .metricValue {
+  color: #f8fafc;
+}
+
+[data-theme="dark"] .metricHint {
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .monitoring-card {
+  background: linear-gradient(145deg, #101a2d, #15223a);
+  border-color: #334155;
+}
+
+[data-theme="dark"] .monitoring-header h3 {
+  color: #f1f5f9;
+}
+
+[data-theme="dark"] .monitoring-grid > div {
+  border-right-color: #334155;
+  color: #e2e8f0;
 }
 
 .versions {

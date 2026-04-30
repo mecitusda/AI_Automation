@@ -1,7 +1,7 @@
 /* ========== BASE ========== */
 :root {
   --bg: #f8fafc;
-  --text: #e6edf3;
+  --text: #0f172a;
   --muted: #64748b;
   --surface: #ffffff;
   --surface-2: #f1f5f9;
@@ -12,11 +12,11 @@
 
 [data-theme="dark"] {
   --bg: #0b0f17;
-  --text: #0f172a;
-  --muted: #8b949e;
+  --text: #f1f5f9;
+  --muted: #cbd5e1;
   --surface: #0f172a;
-  --surface-2: #1e293b;
-  --border: #334155;
+  --surface-2: #172236;
+  --border: #475569;
   --accent: #3b82f6;
   --accent-contrast: #ffffff;
 }
@@ -488,6 +488,35 @@ body{
     border-top: 1px solid #e5e7eb;
     color: #334155;
     font-size: 13px;
+  }
+
+  [data-theme="dark"] .uiCard {
+    box-shadow: 0 12px 28px rgba(2, 6, 23, 0.32);
+  }
+
+  [data-theme="dark"] .systemList__row {
+    border-top-color: #334155;
+    color: #cbd5e1;
+  }
+
+  [data-theme="dark"] .systemList__row span:first-child {
+    color: #f1f5f9;
+  }
+
+  [data-theme="dark"] .pluginCard__header h3 {
+    color: #f1f5f9;
+  }
+
+  [data-theme="dark"] .pluginCard__header p,
+  [data-theme="dark"] .pluginCard__detail,
+  [data-theme="dark"] .pluginCard__meta {
+    color: #cbd5e1;
+  }
+
+  [data-theme="dark"] .pluginCard__meta span {
+    background: #1e293b;
+    color: #e2e8f0;
+    border: 1px solid #334155;
   }
 
   .nodeCommandPaletteBackdrop {

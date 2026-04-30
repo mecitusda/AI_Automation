@@ -36,6 +36,7 @@ export default function App() {
   const isStandaloneRoute = pathname === "/" || pathname === "/docs";
   const isAuthed = Boolean(getAccessToken());
   const isAdmin = getCurrentUserRole() === "admin";
+  const signInActive = pathname === "/login";
   const [standaloneScrolled, setStandaloneScrolled] = useState(false);
   useEffect(() => {
     if (isAuthed) {
@@ -44,6 +45,36 @@ export default function App() {
     }
     disconnectSocket()
   }, [isAuthed])
+
+  const renderPublicHeader = (scrolled: boolean) => (
+    <header className={`standaloneHeader${scrolled ? " standaloneHeader--scrolled" : ""}`}>
+      <div className="standaloneHeader__brand">
+        <Link to="/" className="standaloneHeader__mark"><img src="/images/logo.png" alt="AI Automation" /></Link>
+        <Link to="/" className={pathname === "/" ? "active" : ""}>{t("nav.home")}</Link>
+        <Link to="/docs" className={pathname === "/docs" ? "active" : ""}>{t("nav.docs")}</Link>
+      </div>
+
+      <nav className="standaloneHeader__nav" aria-label="Site navigation">
+        <div className="standaloneHeader__rightLink">
+          <select
+            className="navControlSelect"
+            value={language}
+            onChange={(event) => setLanguage(event.target.value as "en" | "tr")}
+            aria-label="Language"
+          >
+            <option value="en">{t("lang.en")}</option>
+            <option value="tr">{t("lang.tr")}</option>
+          </select>
+          <SwitchThemeButton
+            checked={theme === "dark"}
+            onChange={toggleTheme}
+            ariaLabel={theme === "dark" ? t("theme.dark") : t("theme.light")}
+          />
+          <Link to="/login" className={signInActive ? "active" : ""}>{t("nav.signIn")}</Link>
+        </div>
+      </nav>
+    </header>
+  );
 
   return (
     <ToastProvider>
@@ -57,41 +88,7 @@ export default function App() {
             setStandaloneScrolled((prev) => (prev ? top > 6 : top > 18));
           }}
         > 
-          <header className={`standaloneHeader${standaloneScrolled ? " standaloneHeader--scrolled" : ""}`}>
-            <div  className="standaloneHeader__brand">
-              <Link to="/" className="standaloneHeader__mark"><img src="/images/logo.png" alt="AI Automation" /></Link>
-              <Link to="/" className={pathname === "/" ? "active" : ""}>{t("nav.home")}</Link>
-              <Link to="/docs" className={pathname === "/docs" ? "active" : ""}>{t("nav.docs")}</Link>
-             
-            </div>
-            
-            {pathname === "/docs" ? (
-              <div className="standaloneHeader__search">
-                <span>{t("nav.searchDocs")}</span>
-                <kbd>⌘K</kbd>
-              </div>
-            ) : null}
-            <nav className="standaloneHeader__nav" aria-label="Site navigation">
-
-              <div className="standaloneHeader__rightLink">
-              <select
-                  className="navControlSelect"
-                  value={language}
-                  onChange={(event) => setLanguage(event.target.value as "en" | "tr")}
-                  aria-label="Language"
-                >
-                  <option value="en">{t("lang.en")}</option>
-                  <option value="tr">{t("lang.tr")}</option>
-                </select>
-              <SwitchThemeButton
-                  checked={theme === "dark"}
-                  onChange={toggleTheme}
-                  ariaLabel={theme === "dark" ? t("theme.dark") : t("theme.light")}
-                />
-                <Link to="/login">{t("nav.signIn")}</Link>
-              </div>
-            </nav>
-          </header>
+          {renderPublicHeader(standaloneScrolled)}
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/docs" element={<DocsPage />} />
@@ -188,7 +185,7 @@ export default function App() {
         </aside>
         <div className={`appShell__content${isWorkflowEditRoute ? " appShell__content--edit" : ""}`}>
           <Routes>
-            <Route path="/login" element={<LoginPage />} />
+            <Route path="/login" element={<Navigate to="/runs" replace />} />
             <Route path="/" element={<Navigate to="/runs" replace />} />
             <Route
               path="/metrics"
@@ -220,12 +217,7 @@ export default function App() {
         </div>
       </div>
       ) : (
-      <header className="authHeader" role="banner">
-        <div className="authHeader__inner">
-          <span className="authHeader__brand">AI Automation</span>
-          <span className="authHeader__tagline">{t("nav.workflowAutomationPlatform")}</span>
-        </div>
-      </header>
+      renderPublicHeader(true)
       )} 
       
       {!isAuthed && !isStandaloneRoute ? (
