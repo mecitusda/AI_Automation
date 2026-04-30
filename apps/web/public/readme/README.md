@@ -6,6 +6,7 @@ Put key project screenshots in this folder with the filenames below:
 - `02-workflow-editor.png`
 - `03-run-detail.png`
 - `07-system-monitoring.png`
+- `09-telegram-rss-bot.png`
 
 Recommended:
 - PNG format
